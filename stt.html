@@ -5159,5 +5159,66 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 </script>
+
+<style id="sttAppVideoGateStyle">
+#sttAppVideoGate{
+ position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;
+ background:#070b12;padding:18px;box-sizing:border-box
+}
+#sttAppVideoGate .stt-gate-card{
+ width:min(760px,100%);background:#101722;border:1px solid rgba(255,255,255,.12);
+ border-radius:22px;padding:18px;box-shadow:0 20px 70px rgba(0,0,0,.55);color:#fff;
+ font-family:system-ui,-apple-system,Segoe UI,sans-serif
+}
+#sttAppVideoGate video{display:block;width:100%;max-height:58vh;object-fit:contain;background:#000;border-radius:16px}
+#sttAppVideoGate .stt-gate-title{font-size:20px;font-weight:800;margin:14px 0 5px}
+#sttAppVideoGate .stt-gate-status{font-size:13px;opacity:.75;margin-bottom:14px}
+#sttAppVideoGate button{
+ width:100%;border:0;border-radius:14px;padding:14px;margin-top:9px;font-weight:800;font-size:15px;cursor:pointer
+}
+#sttSoundBtn{background:#fff;color:#111}
+#sttContinueBtn{background:#1f8fff;color:#fff;opacity:.45}
+#sttContinueBtn.ready{opacity:1}
+</style>
+<div id="sttAppVideoGate" role="dialog" aria-modal="true">
+ <div class="stt-gate-card">
+  <video id="sttAppIntroVideo" src="video/app.mp4" playsinline preload="auto"></video>
+  <div class="stt-gate-title">AKTIFKAN SUARA UNTUK MELANJUTKAN</div>
+  <div class="stt-gate-status" id="sttGateStatus">SUARA BELUM DIAKTIFKAN</div>
+  <button id="sttSoundBtn" type="button">🔊 AKTIFKAN SUARA</button>
+  <button id="sttContinueBtn" type="button" disabled>LANJUTKAN →</button>
+ </div>
+</div>
+<script id="sttAppVideoGateScript">
+(function(){
+ const gate=document.getElementById('sttAppVideoGate');
+ const video=document.getElementById('sttAppIntroVideo');
+ const sound=document.getElementById('sttSoundBtn');
+ const cont=document.getElementById('sttContinueBtn');
+ const status=document.getElementById('sttGateStatus');
+ if(!gate||!video||!sound||!cont)return;
+ let soundOK=false;
+ sound.addEventListener('click',async function(){
+   try{
+     video.muted=false;
+     video.volume=1;
+     await video.play();
+     soundOK=true;
+     status.textContent='SUARA AKTIF ✓ — KLIK LANJUTKAN UNTUK MASUK';
+     sound.textContent='🔊 SUARA AKTIF ✓';
+     cont.disabled=false;
+     cont.classList.add('ready');
+   }catch(e){
+     status.textContent='IZINKAN AUDIO BROWSER, LALU TEKAN LAGI';
+   }
+ });
+ cont.addEventListener('click',function(){
+   if(!soundOK)return;
+   gate.remove();
+   document.documentElement.classList.add('stt-app-ready');
+ });
+})();
+</script>
+
 </body>
 </html>
