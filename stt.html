@@ -1176,21 +1176,6 @@ header .subtitle{font-size:1rem}
   .container > .card:first-of-type .row{display:grid;grid-template-columns:repeat(4,1fr)}
 }
 
-
-/* ================= SOUND ACTIVATION GATE ================= */
-#sttSoundGate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:22px;background:linear-gradient(145deg,#06152f,#0b3d91 55%,#071b38);color:#fff;font-family:Poppins,Arial,sans-serif}
-#sttSoundGate .sound-gate-card{width:min(460px,100%);padding:30px 24px;border:1px solid rgba(255,255,255,.16);border-radius:24px;background:rgba(255,255,255,.10);box-shadow:0 24px 70px rgba(0,0,0,.38);backdrop-filter:blur(18px);text-align:center}
-#sttSoundGate .sound-gate-icon{width:76px;height:76px;margin:0 auto 18px;border-radius:22px;display:grid;place-items:center;background:rgba(255,255,255,.14);font-size:32px}
-#sttSoundGate h2{margin:0 0 10px;font-size:22px;font-weight:800;letter-spacing:.2px}
-#sttSoundGate p{margin:0 auto 22px;max-width:360px;color:rgba(255,255,255,.78);font-size:14px;line-height:1.55}
-#sttSoundGate .sound-gate-status{min-height:22px;margin:0 0 16px;font-size:13px;font-weight:700;color:#cbd5e1}
-#sttSoundGate button{width:100%;min-height:50px;border:0;border-radius:14px;font:800 14px Poppins,Arial,sans-serif;cursor:pointer;transition:.2s transform,.2s opacity,.2s filter}
-#sttSoundGate button:active{transform:scale(.98)}
-#sttSoundEnable{background:#fff;color:#0b3d91}
-#sttSoundContinue{margin-top:10px;background:#10b981;color:#fff;opacity:.45;cursor:not-allowed}
-#sttSoundContinue.ready{opacity:1;cursor:pointer;box-shadow:0 10px 30px rgba(16,185,129,.25)}
-body.stt-sound-locked{overflow:hidden}
-
 </style>
 
 <style id="ALLSTT premium letterhead editor">
@@ -1284,69 +1269,6 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 </style>
 </head>
 <body>
-
-<!-- ================= SOUND ACTIVATION GATE ================= -->
-<div id="sttSoundGate" role="dialog" aria-modal="true" aria-labelledby="sttSoundGateTitle">
-  <div class="sound-gate-card">
-    <div class="sound-gate-icon" aria-hidden="true">🔊</div>
-    <h2 id="sttSoundGateTitle">AKTIFKAN SUARA APLIKASI</h2>
-    <p>SEBELUM MASUK KE APLIKASI, AKTIFKAN SUARA TERLEBIH DAHULU AGAR AUDIO DAN VIDEO DAPAT BERJALAN DENGAN BENAR.</p>
-    <div class="sound-gate-status" id="sttSoundGateStatus">SUARA BELUM DIAKTIFKAN</div>
-    <button id="sttSoundEnable" type="button">🔊 AKTIFKAN SUARA</button>
-    <button id="sttSoundContinue" type="button" disabled>LANJUTKAN →</button>
-  </div>
-</div>
-<script>
-(function(){
-  'use strict';
-  document.body.classList.add('stt-sound-locked');
-  var gate=document.getElementById('sttSoundGate');
-  var enable=document.getElementById('sttSoundEnable');
-  var cont=document.getElementById('sttSoundContinue');
-  var status=document.getElementById('sttSoundGateStatus');
-  var audioCtx=null;
-  var activated=false;
-
-  function setReady(){
-    activated=true;
-    status.textContent='SUARA AKTIF ✓';
-    status.style.color='#6ee7b7';
-    enable.textContent='✓ SUARA SUDAH AKTIF';
-    enable.disabled=true;
-    enable.style.opacity='.75';
-    cont.disabled=false;
-    cont.classList.add('ready');
-  }
-
-  enable.addEventListener('click',async function(){
-    try{
-      var AC=window.AudioContext||window.webkitAudioContext;
-      if(AC){
-        audioCtx=audioCtx||new AC();
-        if(audioCtx.state==='suspended') await audioCtx.resume();
-        // Create a near-silent audio pulse during the user gesture to unlock audio.
-        var osc=audioCtx.createOscillator();
-        var gain=audioCtx.createGain();
-        gain.gain.value=0.0001;
-        osc.connect(gain); gain.connect(audioCtx.destination);
-        osc.start(); osc.stop(audioCtx.currentTime+0.03);
-      }
-      setReady();
-    }catch(err){
-      // Some browsers do not expose AudioContext; the click itself still establishes user activation.
-      setReady();
-    }
-  });
-
-  cont.addEventListener('click',function(){
-    if(!activated) return;
-    document.body.classList.remove('stt-sound-locked');
-    gate.remove();
-    try{window.dispatchEvent(new CustomEvent('stt:sound-ready'));}catch(e){}
-  });
-})();
-</script>
-
 
 <!-- ==================== PROFESSIONAL NAVIGATION SHELL ==================== -->
 <button class="hamburger" id="hamburgerBtn" aria-label="Buka menu navigasi" aria-expanded="false">
@@ -5030,7 +4952,7 @@ return await retry(()=>new Promise((resolve,reject)=>{
   const form=document.createElement('form');
   form.method='POST';form.action=API;form.target=iframe.name;form.enctype='application/x-www-form-urlencoded';form.style.display='none';
   const add=(name,value)=>{const i=document.createElement('input');i.type='hidden';i.name=name;i.value=String(value??'');form.appendChild(i);};
-  add('action',p.action||'');
+  add('action',p.action||'');add('admin_session',adminSessionToken||'');add('token',adminSessionToken||'');
   if(p.action==='SAVE_FINDING'){const d=p.data||{};add('finding_id',d.finding_id);add('area_code',d.area_code);add('photo_url',JSON.stringify(photosOf(d)));add('description',d.description);add('finder_name',d.finder_name);add('created_at',d.created_at);add('status',d.status);}
   else if(p.action==='UPDATE_STATUS'){add('finding_id',p.finding_id);add('status',p.status);}
   else if(p.action==='DELETE_FINDING'){add('finding_id',p.finding_id);}
@@ -5056,7 +4978,7 @@ async function uploadPhoto(blob,meta,index,total){
     iframe.name='stt_upload_'+uploadId;iframe.style.display='none';
     const form=document.createElement('form');form.method='POST';form.action=API;form.target=iframe.name;form.enctype='application/x-www-form-urlencoded';form.style.display='none';
     const add=(n,v)=>{const i=document.createElement('input');i.type='hidden';i.name=n;i.value=String(v??'');form.appendChild(i);};
-    add('action','UPLOAD_PHOTO_BASE64');add('upload_id',uploadId);add('finding_id',meta.findingId||'');add('mime',mime);add('filename',filename);add('data_base64',base64);
+    add('action','UPLOAD_PHOTO_BASE64');add('admin_session',adminSessionToken||'');add('token',adminSessionToken||'');add('upload_id',uploadId);add('finding_id',meta.findingId||'');add('mime',mime);add('filename',filename);add('data_base64',base64);
     let done=false;const finish=(err)=>{if(done)return;done=true;clearTimeout(timer);iframe.remove();form.remove();err?reject(err):resolve(true);};
     const timer=setTimeout(()=>finish(new Error('Upload foto timeout.')),UPLOAD_TIMEOUT);
     iframe.onload=()=>setTimeout(()=>finish(null),400);iframe.onerror=()=>finish(new Error('Upload foto gagal.'));
@@ -5159,66 +5081,36 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 </script>
-
 <style id="sttAppVideoGateStyle">
-#sttAppVideoGate{
- position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;
- background:#070b12;padding:18px;box-sizing:border-box
-}
-#sttAppVideoGate .stt-gate-card{
- width:min(760px,100%);background:#101722;border:1px solid rgba(255,255,255,.12);
- border-radius:22px;padding:18px;box-shadow:0 20px 70px rgba(0,0,0,.55);color:#fff;
- font-family:system-ui,-apple-system,Segoe UI,sans-serif
-}
+#sttAppVideoGate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:#070b12;padding:18px;box-sizing:border-box}
+#sttAppVideoGate .stt-gate-card{width:min(760px,100%);background:#101722;border:1px solid rgba(255,255,255,.12);border-radius:22px;padding:18px;box-shadow:0 20px 70px rgba(0,0,0,.55);color:#fff;font-family:inherit}
 #sttAppVideoGate video{display:block;width:100%;max-height:58vh;object-fit:contain;background:#000;border-radius:16px}
-#sttAppVideoGate .stt-gate-title{font-size:20px;font-weight:800;margin:14px 0 5px}
-#sttAppVideoGate .stt-gate-status{font-size:13px;opacity:.75;margin-bottom:14px}
-#sttAppVideoGate button{
- width:100%;border:0;border-radius:14px;padding:14px;margin-top:9px;font-weight:800;font-size:15px;cursor:pointer
-}
-#sttSoundBtn{background:#fff;color:#111}
-#sttContinueBtn{background:#1f8fff;color:#fff;opacity:.45}
-#sttContinueBtn.ready{opacity:1}
+#sttAppVideoGate .stt-gate-title{font-size:20px;font-weight:900;margin:14px 0 5px}
+#sttAppVideoGate .stt-gate-status{font-size:13px;opacity:.78;margin-bottom:14px}
+#sttAppVideoGate button{width:100%;border:0;border-radius:14px;padding:14px;margin-top:9px;font-weight:900;font-size:15px;cursor:pointer}
+#sttSoundBtn{background:#fff;color:#111}#sttContinueBtn{background:#1f8fff;color:#fff;opacity:.45}#sttContinueBtn.ready{opacity:1}
 </style>
 <div id="sttAppVideoGate" role="dialog" aria-modal="true">
  <div class="stt-gate-card">
   <video id="sttAppIntroVideo" src="video/app.mp4" playsinline preload="auto"></video>
-  <div class="stt-gate-title">AKTIFKAN SUARA UNTUK MELANJUTKAN</div>
-  <div class="stt-gate-status" id="sttGateStatus">SUARA BELUM DIAKTIFKAN</div>
+  <div class="stt-gate-title">AKTIFKAN SUARA UNTUK MASUK</div>
+  <div class="stt-gate-status" id="sttGateStatus">TEKAN SEKALI UNTUK MENGAKTIFKAN SUARA</div>
   <button id="sttSoundBtn" type="button">🔊 AKTIFKAN SUARA</button>
   <button id="sttContinueBtn" type="button" disabled>LANJUTKAN →</button>
  </div>
 </div>
 <script id="sttAppVideoGateScript">
 (function(){
- const gate=document.getElementById('sttAppVideoGate');
- const video=document.getElementById('sttAppIntroVideo');
- const sound=document.getElementById('sttSoundBtn');
- const cont=document.getElementById('sttContinueBtn');
- const status=document.getElementById('sttGateStatus');
+ const gate=document.getElementById('sttAppVideoGate'),video=document.getElementById('sttAppIntroVideo'),sound=document.getElementById('sttSoundBtn'),cont=document.getElementById('sttContinueBtn'),status=document.getElementById('sttGateStatus');
  if(!gate||!video||!sound||!cont)return;
  let soundOK=false;
- sound.addEventListener('click',async function(){
-   try{
-     video.muted=false;
-     video.volume=1;
-     await video.play();
-     soundOK=true;
-     status.textContent='SUARA AKTIF ✓ — KLIK LANJUTKAN UNTUK MASUK';
-     sound.textContent='🔊 SUARA AKTIF ✓';
-     cont.disabled=false;
-     cont.classList.add('ready');
-   }catch(e){
-     status.textContent='IZINKAN AUDIO BROWSER, LALU TEKAN LAGI';
-   }
+ sound.addEventListener('click',async()=>{
+   if(soundOK)return;
+   try{video.muted=false;video.volume=1;await video.play();soundOK=true;sound.textContent='🔊 SUARA AKTIF ✓';sound.disabled=true;status.textContent='SUARA AKTIF ✓ — SEKARANG KLIK LANJUTKAN';cont.disabled=false;cont.classList.add('ready');}
+   catch(e){status.textContent='IZINKAN AUDIO BROWSER, LALU TEKAN TOMBOL INI SEKALI LAGI';}
  });
- cont.addEventListener('click',function(){
-   if(!soundOK)return;
-   gate.remove();
-   document.documentElement.classList.add('stt-app-ready');
- });
+ cont.addEventListener('click',()=>{if(!soundOK)return;gate.remove();try{video.pause();}catch(_){};document.documentElement.classList.add('stt-app-ready');});
 })();
 </script>
-
 </body>
 </html>
