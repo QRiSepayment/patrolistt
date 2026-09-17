@@ -1176,6 +1176,21 @@ header .subtitle{font-size:1rem}
   .container > .card:first-of-type .row{display:grid;grid-template-columns:repeat(4,1fr)}
 }
 
+
+/* ================= SOUND ACTIVATION GATE ================= */
+#sttSoundGate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:22px;background:linear-gradient(145deg,#06152f,#0b3d91 55%,#071b38);color:#fff;font-family:Poppins,Arial,sans-serif}
+#sttSoundGate .sound-gate-card{width:min(460px,100%);padding:30px 24px;border:1px solid rgba(255,255,255,.16);border-radius:24px;background:rgba(255,255,255,.10);box-shadow:0 24px 70px rgba(0,0,0,.38);backdrop-filter:blur(18px);text-align:center}
+#sttSoundGate .sound-gate-icon{width:76px;height:76px;margin:0 auto 18px;border-radius:22px;display:grid;place-items:center;background:rgba(255,255,255,.14);font-size:32px}
+#sttSoundGate h2{margin:0 0 10px;font-size:22px;font-weight:800;letter-spacing:.2px}
+#sttSoundGate p{margin:0 auto 22px;max-width:360px;color:rgba(255,255,255,.78);font-size:14px;line-height:1.55}
+#sttSoundGate .sound-gate-status{min-height:22px;margin:0 0 16px;font-size:13px;font-weight:700;color:#cbd5e1}
+#sttSoundGate button{width:100%;min-height:50px;border:0;border-radius:14px;font:800 14px Poppins,Arial,sans-serif;cursor:pointer;transition:.2s transform,.2s opacity,.2s filter}
+#sttSoundGate button:active{transform:scale(.98)}
+#sttSoundEnable{background:#fff;color:#0b3d91}
+#sttSoundContinue{margin-top:10px;background:#10b981;color:#fff;opacity:.45;cursor:not-allowed}
+#sttSoundContinue.ready{opacity:1;cursor:pointer;box-shadow:0 10px 30px rgba(16,185,129,.25)}
+body.stt-sound-locked{overflow:hidden}
+
 </style>
 
 <style id="ALLSTT premium letterhead editor">
@@ -1269,6 +1284,69 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 </style>
 </head>
 <body>
+
+<!-- ================= SOUND ACTIVATION GATE ================= -->
+<div id="sttSoundGate" role="dialog" aria-modal="true" aria-labelledby="sttSoundGateTitle">
+  <div class="sound-gate-card">
+    <div class="sound-gate-icon" aria-hidden="true">🔊</div>
+    <h2 id="sttSoundGateTitle">AKTIFKAN SUARA APLIKASI</h2>
+    <p>SEBELUM MASUK KE APLIKASI, AKTIFKAN SUARA TERLEBIH DAHULU AGAR AUDIO DAN VIDEO DAPAT BERJALAN DENGAN BENAR.</p>
+    <div class="sound-gate-status" id="sttSoundGateStatus">SUARA BELUM DIAKTIFKAN</div>
+    <button id="sttSoundEnable" type="button">🔊 AKTIFKAN SUARA</button>
+    <button id="sttSoundContinue" type="button" disabled>LANJUTKAN →</button>
+  </div>
+</div>
+<script>
+(function(){
+  'use strict';
+  document.body.classList.add('stt-sound-locked');
+  var gate=document.getElementById('sttSoundGate');
+  var enable=document.getElementById('sttSoundEnable');
+  var cont=document.getElementById('sttSoundContinue');
+  var status=document.getElementById('sttSoundGateStatus');
+  var audioCtx=null;
+  var activated=false;
+
+  function setReady(){
+    activated=true;
+    status.textContent='SUARA AKTIF ✓';
+    status.style.color='#6ee7b7';
+    enable.textContent='✓ SUARA SUDAH AKTIF';
+    enable.disabled=true;
+    enable.style.opacity='.75';
+    cont.disabled=false;
+    cont.classList.add('ready');
+  }
+
+  enable.addEventListener('click',async function(){
+    try{
+      var AC=window.AudioContext||window.webkitAudioContext;
+      if(AC){
+        audioCtx=audioCtx||new AC();
+        if(audioCtx.state==='suspended') await audioCtx.resume();
+        // Create a near-silent audio pulse during the user gesture to unlock audio.
+        var osc=audioCtx.createOscillator();
+        var gain=audioCtx.createGain();
+        gain.gain.value=0.0001;
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime+0.03);
+      }
+      setReady();
+    }catch(err){
+      // Some browsers do not expose AudioContext; the click itself still establishes user activation.
+      setReady();
+    }
+  });
+
+  cont.addEventListener('click',function(){
+    if(!activated) return;
+    document.body.classList.remove('stt-sound-locked');
+    gate.remove();
+    try{window.dispatchEvent(new CustomEvent('stt:sound-ready'));}catch(e){}
+  });
+})();
+</script>
+
 
 <!-- ==================== PROFESSIONAL NAVIGATION SHELL ==================== -->
 <button class="hamburger" id="hamburgerBtn" aria-label="Buka menu navigasi" aria-expanded="false">
@@ -2241,9 +2319,8 @@ async function autoStorageCleanup() {
             Object.keys(patrolData).forEach(areaKey => {
                 const area = patrolData[areaKey];
                 area.photos.forEach(photo => {
-                    if (photo && photo.ref) {
-                        usedBlobKeys.add(photo.ref);
-                    }
+                    if (photo && photo.ref) usedBlobKeys.add(photo.ref);
+                    if (photo && photo.masterRef) usedBlobKeys.add(photo.masterRef);
                 });
             });
             
@@ -2771,7 +2848,8 @@ function setupSuperCleanup() {
     if(!compressed) throw new Error('Foto gagal diproses.');
 
     officerPhotoBlob = file;
-    officerPhotoDataUrl = compressed;
+    officerPhotoDataUrl = raw;
+    window.STT_OFFICER_PHOTO_PREVIEW = compressed;
     officerPhotoRef = 'memory_officer_face';
 
     const img = document.getElementById('officerPhotoPreview');
@@ -3297,7 +3375,7 @@ function setupSuperCleanup() {
       try {
         const data = await fileToDataURL(file);
         const comp = await compressDataUrl(data,0.98,4096);
-        await addPhotoToArea(comp,currentTargetArea);
+        await addPhotoToArea(comp,currentTargetArea,file);
       } catch(err) { console.error(err); alert('❌ Gagal memproses foto: '+(err?.message||err)); }
       finally { hideOverlay(); }
     }
@@ -3307,7 +3385,7 @@ function setupSuperCleanup() {
         for(let i=0;i<files.length;i++) {
           const data=await fileToDataURL(files[i]);
           const comp=await compressDataUrl(data,0.98,4096);
-          await addPhotoToArea(comp,currentTargetArea);
+          await addPhotoToArea(comp,currentTargetArea,files[i]);
           setOverlayProgress(Math.round(((i+1)/files.length)*100));
         }
       } catch(err) { console.error(err); alert('❌ Gagal memproses foto: '+(err?.message||err)); }
@@ -3315,28 +3393,30 @@ function setupSuperCleanup() {
     }
   }
 
-  async function addPhotoToArea(dataUrl, targetAreaKey) {
+  async function addPhotoToArea(dataUrl, targetAreaKey, originalFile=null) {
     if (!patrolData[targetAreaKey]) { alert('❌ Area tidak ditemukan!'); return; }
     const area=patrolData[targetAreaKey];
     if (!Array.isArray(area.photos)) area.photos=[];
     if (!Array.isArray(area.descriptions)) area.descriptions=[];
     try {
-      // Foto baru selalu disimpan sebagai Blob di IndexedDB agar localStorage tidak penuh.
+      // DUAL-SOURCE: preview hemat storage + MASTER asli untuk PDF/Word.
       if (db) {
-        const blob=await (await fetch(dataUrl)).blob();
-        const key='b_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
-        await idbPut(STORE_BLOBS,key,blob);
-        await idbPut(STORE_META,key,{name:'patrol-photo.jpg',ts:new Date().toISOString(),type:blob.type});
-        area.photos.push({ref:key});
+        const previewBlob=await (await fetch(dataUrl)).blob();
+        const previewKey='b_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
+        await idbPut(STORE_BLOBS,previewKey,previewBlob);
+        await idbPut(STORE_META,previewKey,{name:'patrol-preview.jpg',ts:new Date().toISOString(),type:previewBlob.type,role:'preview'});
+        const masterKey='m_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
+        const masterBlob=originalFile instanceof Blob ? originalFile : previewBlob;
+        await idbPut(STORE_BLOBS,masterKey,masterBlob);
+        await idbPut(STORE_META,masterKey,{name:originalFile?.name||'patrol-master',ts:new Date().toISOString(),type:originalFile?.type||masterBlob.type,role:'master'});
+        area.photos.push({ref:previewKey,masterRef:masterKey});
       } else {
-        // Fallback hanya jika IndexedDB benar-benar tidak tersedia.
-        area.photos.push(dataUrl);
+        area.photos.push(originalFile instanceof Blob ? {blob:originalFile,preview:dataUrl} : dataUrl);
       }
       area.descriptions.push(getAreaDefaultDescription(area));
       if(!Array.isArray(area.descriptionFlags)) area.descriptionFlags=[]; area.descriptionFlags.push(false);
       area.timestamp=Date.now();
-      persistMeta();
-      renderAreas();
+      persistMeta(); renderAreas();
       alert('✅ Foto berhasil ditambahkan ke '+area.name);
     } catch(err) {
       console.error('[PHOTO STORAGE]',err);
@@ -3431,21 +3511,20 @@ function setupSuperCleanup() {
             await Promise.all(chunk.map(async (f)=>{
               try{
                 const data = await fileToDataURL(f);
-                const comp = await compressDataUrl(data, 0.9, 1920);
-                let key = null;
+                const comp = await compressDataUrl(data, 0.98, 4096);
+                let key = null, masterKey = null;
                 if(db){
                   try{
-                    const blob = await (await fetch(comp)).blob();
+                    const previewBlob = await (await fetch(comp)).blob();
                     key = 'b_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-                    await idbPut(STORE_BLOBS, key, blob);
-                    await idbPut(STORE_META, key, { name: f.name, ts: new Date().toISOString() });
-                    patrolData[k].photos.push({ ref:key });
-                  }catch(e){
-                    patrolData[k].photos.push(comp);
-                  }
-                } else {
-                  patrolData[k].photos.push(comp);
-                }
+                    await idbPut(STORE_BLOBS, key, previewBlob);
+                    await idbPut(STORE_META, key, { name: f.name, ts: new Date().toISOString(), role:'preview' });
+                    masterKey = 'm_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+                    await idbPut(STORE_BLOBS, masterKey, f);
+                    await idbPut(STORE_META, masterKey, { name: f.name, ts: new Date().toISOString(), type:f.type, role:'master' });
+                    patrolData[k].photos.push({ ref:key, masterRef:masterKey });
+                  }catch(e){ patrolData[k].photos.push(comp); }
+                } else { patrolData[k].photos.push({blob:f,preview:comp}); }
                 patrolData[k].descriptions.push(getAreaDefaultDescription(patrolData[k]));
                 if(!Array.isArray(patrolData[k].descriptionFlags)) patrolData[k].descriptionFlags=[]; patrolData[k].descriptionFlags.push(false);
                 persistMeta();
@@ -3607,10 +3686,12 @@ function setupSuperCleanup() {
         document.getElementById('delPhoto')?.addEventListener('click', async ()=>{
             if(!confirm('Hapus foto ini permanen?')) return;
             const ref = p && p.ref ? p.ref : null;
+            const masterRef = p && p.masterRef ? p.masterRef : null;
             if(ref) {
                 await idbDelete(STORE_BLOBS, ref);
                 memoryManager.revokeBlobUrl(blobKey);
             }
+            if(masterRef) { try{ await idbDelete(STORE_BLOBS, masterRef); }catch(_){} }
             a.photos.splice(idx,1); 
             a.descriptions.splice(idx,1); if(Array.isArray(a.descriptionFlags)) a.descriptionFlags.splice(idx,1);
             persistMeta(); 
@@ -3924,33 +4005,23 @@ function setupSuperCleanup() {
   }
 
   async function compressAllPhotos() {
-    const keys = Object.keys(patrolData); 
-    let total = 0;
-    keys.forEach(k => total += (patrolData[k].photos || []).length);
-    
-    if (total === 0) {
-      showStatus('ℹ️ Tidak ada foto yang perlu dikompres.', 'info');
-      return;
-    }
-
-    let processed = 0;
-    for (const k of keys) {
-      for (let i = 0; i < (patrolData[k].photos || []).length; i++) {
-        try {
-          const p = patrolData[k].photos[i];
-          if (typeof p === 'string') {
-            const re = await compressDataUrl(p, 0.98, 4096);
-            patrolData[k].photos[i] = re;
-          }
-          processed++;
-          setOverlayProgress(Math.round((processed / Math.max(1, total)) * 100));
-        } catch (e) {
-          console.warn('Gagal mengompres foto:', e);
+    const keys=Object.keys(patrolData); let total=0; keys.forEach(k=>total+=(patrolData[k].photos||[]).length);
+    if(!total){showStatus('ℹ️ Tidak ada foto yang perlu diproses.','info');return;}
+    let processed=0;
+    for(const k of keys) for(let i=0;i<(patrolData[k].photos||[]).length;i++){
+      const p=patrolData[k].photos[i];
+      try{
+        // Jangan pernah mengompres MASTER. Migrasikan hanya foto legacy yang belum punya masterRef.
+        if(typeof p==='string' && db){
+          const masterBlob=await (await fetch(p)).blob(), preview=await compressDataUrl(p,0.98,4096), previewBlob=await (await fetch(preview)).blob();
+          const base='_'+Date.now()+'_'+Math.random().toString(36).slice(2,8), masterKey='m'+base, previewKey='b'+base;
+          await idbPut(STORE_BLOBS,masterKey,masterBlob); await idbPut(STORE_BLOBS,previewKey,previewBlob);
+          patrolData[k].photos[i]={ref:previewKey,masterRef:masterKey};
         }
-      }
+      }catch(e){console.warn('Gagal memproses foto:',e)}
+      processed++; setOverlayProgress(Math.round(processed/Math.max(1,total)*100));
     }
-    persistMeta();
-    renderAreas();
+    persistMeta(); renderAreas(); showStatus('✅ MASTER FOTO AMAN — KOMPRESI HANYA PADA PREVIEW.','success');
   }
 
   async function backupData() {
@@ -4007,6 +4078,8 @@ document.getElementById('genPdfBtn')?.addEventListener('click', async ()=>{
     const safe=v=>String(v??'').replace(/[\\/:*?"<>|]/g,'-').replace(/\s+/g,'_').slice(0,80);
 
     async function photoData(p){
+      if(p&&typeof p==='object'&&p.masterRef){const b=await idbGet(STORE_BLOBS,p.masterRef);if(b)return await blobToBase64(b);}
+      if(p&&typeof p==='object'&&p.blob instanceof Blob)return await blobToBase64(p.blob);
       if(p&&typeof p==='object'&&p.ref){const b=await idbGet(STORE_BLOBS,p.ref);return b?await blobToBase64(b):null;}
       return typeof p==='string'?p:null;
     }
@@ -4125,7 +4198,7 @@ document.getElementById('genPdfBtn')?.addEventListener('click', async ()=>{
       const notes=String(area.notes||area.globalDescription||'').trim();
       if(notes){pdf.setFont('helvetica','bold');pdf.setFontSize(8.5);pdf.setTextColor(...BLUE);pdf.text('CATATAN AREA',M,y);y+=5;pdf.setFont('helvetica','normal');pdf.setFontSize(8.5);pdf.setTextColor(...TEXT);const nl=pdf.splitTextToSize(notes,W-2*M);pdf.text(nl,M,y);y+=nl.length*4.2+5;}
       const tpl=getAreaTemplateForPatrol(area);
-      if(tpl){pdf.setFont('helvetica','bold');pdf.setFontSize(8.5);pdf.setTextColor(...BLUE);pdf.text('TEMPLATE PATROLI AREA',M,y);y+=5;pdf.setFont('helvetica','normal');pdf.setFontSize(8);pdf.setTextColor(...TEXT);const narrative=pdf.splitTextToSize(String(tpl.descriptionTemplate||getAreaDefaultDescription(area)).toUpperCase(),W-2*M-4);pdf.text(narrative,M,y);y+=narrative.length*3.7+4;pdf.setFont('helvetica','bold');pdf.setFontSize(8.5);pdf.setTextColor(...BLUE);pdf.text('TITIK PEMERIKSAAN PETUGAS',M,y);y+=5;pdf.setFont('helvetica','normal');pdf.setFontSize(8);pdf.setTextColor(...TEXT);const cl=pdf.splitTextToSize(tpl.checks.map((x,j)=>`${j+1}. ${String(x).toUpperCase()}`).join('\n'),W-2*M-4);pdf.text(cl,M,y);y+=cl.length*3.7+5;}
+      if(tpl){pdf.setFont('helvetica','bold');pdf.setFontSize(8.5);pdf.setTextColor(...BLUE);pdf.text('STANDAR PEMERIKSAAN AREA',M,y);y+=5;pdf.setFont('helvetica','normal');pdf.setFontSize(8);pdf.setTextColor(...TEXT);const narrative=pdf.splitTextToSize(String(tpl.descriptionTemplate||getAreaDefaultDescription(area)).toUpperCase(),W-2*M-4);pdf.text(narrative,M,y);y+=narrative.length*3.7+4;pdf.setFont('helvetica','bold');pdf.setFontSize(8.5);pdf.setTextColor(...BLUE);pdf.text('TITIK PEMERIKSAAN PETUGAS',M,y);y+=5;pdf.setFont('helvetica','normal');pdf.setFontSize(8);pdf.setTextColor(...TEXT);const cl=pdf.splitTextToSize(tpl.checks.map((x,j)=>`${j+1}. ${String(x).toUpperCase()}`).join('\n'),W-2*M-4);pdf.text(cl,M,y);y+=cl.length*3.7+5;}
       let i=0;while(i<photos.length){const leftW=88,rightX=M+98,rightW=W-M-rightX;const rawDesc=String(area.descriptions?.[i]??'').trim();const desc=isLegacyGenericDescription(rawDesc)?getAreaDefaultDescription(area):rawDesc;const isFN=!!area.descriptionFlags?.[i] || /\b(finding|temuan|rusak|mati|error|defect|amblas|hilang|terbuka|bocor|off|tidak berfungsi)\b/i.test(desc);const descSize=isFN?11:9;pdf.setFont('helvetica',isFN?'bold':'normal');pdf.setFontSize(descSize);const dl=pdf.splitTextToSize(desc,rightW-8);const rowH=isFN?Math.max(84,17+dl.length*6.4+8):84;if(y+rowH>H-28){footer();pdf.addPage();areaHeader(`AREA ${ai+1}: ${area.name||`Area ${ai+1}`} • LANJUTAN`);y=47;}pdf.setFillColor(...PANEL);pdf.rect(M,y,leftW,rowH,'F');if(isFN)pdf.setFillColor(254,226,226);pdf.rect(rightX,y,rightW,rowH,'F');const src=await photoData(photos[i]);if(src){try{await addContain(src,M+2,y+2,leftW-4,rowH-4);}catch(_){}}pdf.setFont('helvetica','normal');pdf.setFontSize(10);pdf.setTextColor(...TEXT);pdf.text(`Foto ${i+1}`,rightX+4,y+15);pdf.setFont('helvetica',isFN?'bold':'normal');pdf.setFontSize(descSize);pdf.setTextColor(...TEXT);pdf.text(dl,rightX+4,y+27);y+=rowH+8;done++;setOverlayProgress(5+Math.round((done/Math.max(1,totalPhotos))*70));i++;}
       if(!photos.length){pdf.setFont('helvetica','normal');pdf.setFontSize(9);pdf.setTextColor(...MUTED);pdf.text('Tidak ada foto evidence pada area ini.',M,y);y+=15;}
       const signatureH=72;if(y+signatureH>H-20){footer();pdf.addPage();areaHeader('TANDA TANGAN DAN VERIFIKASI');y=62;}else{y+=3;pdf.setDrawColor(...LINE);pdf.setLineWidth(.45);pdf.line(M,y,W-M,y);y+=8;pdf.setFont('helvetica','normal');pdf.setFontSize(11);pdf.setTextColor(...TEXT);pdf.text('TANDA TANGAN DAN VERIFIKASI',W/2,y,{align:'center'});y+=8;}
@@ -4182,6 +4255,8 @@ document.getElementById('genWordBtn')?.addEventListener('click', async ()=>{
         try{ return await blobToBase64(p); }catch(_){ return null; }
       }
       if(p&&typeof p==='object'){
+        if(p.masterRef){const b=await idbGet(STORE_BLOBS,p.masterRef);if(b)return await blobToBase64(b);}
+        if(p.blob instanceof Blob) return await blobToBase64(p.blob);
         if(p.ref){
           const b=await idbGet(STORE_BLOBS,p.ref);
           return b?await blobToBase64(b):null;
@@ -4246,7 +4321,7 @@ document.getElementById('genWordBtn')?.addEventListener('click', async ()=>{
         body+=shadedBlock(fb,'FEE2E2','DC2626');
       }
       const notes=String(area.notes||area.globalDescription||'').trim();if(notes)body+=pText('CATATAN AREA',{bold:true,size:10,color:'144891',after:30})+pLines(escText(notes),{size:10,after:80});
-      const tpl=getAreaTemplateForPatrol(area);if(tpl)body+=pText('TEMPLATE PATROLI AREA',{bold:true,size:10,color:'144891',after:30})+pLines(escText(String(tpl.descriptionTemplate||getAreaDefaultDescription(area)).toUpperCase()),{size:9,after:35})+pText('TITIK PEMERIKSAAN PETUGAS',{bold:true,size:10,color:'144891',after:30})+pLines(escText(tpl.checks.map((x,j)=>`${j+1}. ${String(x).toUpperCase()}`).join('\n')),{size:9,after:70});
+      const tpl=getAreaTemplateForPatrol(area);if(tpl)body+=pText('STANDAR PEMERIKSAAN AREA',{bold:true,size:10,color:'144891',after:30})+pLines(escText(String(tpl.descriptionTemplate||getAreaDefaultDescription(area)).toUpperCase()),{size:9,after:35})+pText('TITIK PEMERIKSAAN PETUGAS',{bold:true,size:10,color:'144891',after:30})+pLines(escText(tpl.checks.map((x,j)=>`${j+1}. ${String(x).toUpperCase()}`).join('\n')),{size:9,after:70});
       for(let i=0;i<photos.length;i++){const src=await photoDataWord(photos[i]);const rawDesc=String(area.descriptions?.[i]??'').trim();const desc=isLegacyGenericDescription(rawDesc)?getAreaDefaultDescription(area):rawDesc;const isFN=!!area.descriptionFlags?.[i] || /\b(finding|temuan|rusak|mati|error|defect|amblas|hilang|terbuka|bocor|off|tidak berfungsi)\b/i.test(desc);const left=src?pImage(src,7.2,6.8):pText('Foto tidak tersedia',{align:'center',size:10});const right=pText(`Foto ${i+1}`,{bold:true,size:11,color:'144891',after:50})+pLines(escText(desc),isFN?{bold:true,size:13,after:20}:{size:10,after:20});body+=table([[left,right]],[4680,4680],isFN?[[null,'FEE2E2']]:undefined)+pText('',{after:70});done++;setOverlayProgress(5+Math.round(done/Math.max(1,totalPhotos)*80));}
       if(!photos.length)body+=pText('Tidak ada foto evidence pada area ini.',{size:10,after:80});
     }
@@ -5112,5 +5187,19 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
  cont.addEventListener('click',()=>{if(!soundOK)return;gate.remove();try{video.pause();}catch(_){};document.documentElement.classList.add('stt-app-ready');});
 })();
 </script>
+
+<script id="sttLiveFindingNotesNav">
+(function(){
+  const LIVE_FINDING_NOTES_URL = 'https://qrisepayment.github.io/patrolistt/fn.html';
+  document.addEventListener('click', function(e){
+    const item = e.target.closest('[data-action="finding-notes"]');
+    if(!item) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    window.location.href = LIVE_FINDING_NOTES_URL;
+  }, true);
+})();
+</script>
+
 </body>
 </html>
