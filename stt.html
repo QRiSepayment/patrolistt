@@ -4776,7 +4776,7 @@ renderAreas();
     }
     return `<div class="dac-card">
       <h2>🔐 LOGIN PETUGAS</h2>
-      <p>Masukkan Username &amp; Password. Kalau username belum pernah dipakai, akun baru otomatis dibuat.</p>
+      <p>Masukkan Username &amp; Password yang sudah dibuatkan ADMIN.</p>
       <input id="ugUser" class="dac-input" placeholder="Username" autocomplete="off">
       <input id="ugPass" class="dac-input" type="password" placeholder="Password (min 4 karakter)" autocomplete="off">
       <button id="ugSubmit" type="button" class="dac-btn">🔓 MASUK</button>
@@ -4837,7 +4837,7 @@ renderAreas();
         apply('allowed');
       }else{
         const m=(j&&(j.message||j.error))||'Login gagal.';
-        if(msgEl)msgEl.textContent='❌ '+(m==='USER_BLOCKED'?'Akun ini diblokir ADMIN.':m==='INVALID_PASSWORD'?'Password salah.':m);
+        if(msgEl)msgEl.textContent='❌ '+(m==='USER_BLOCKED'?'Akun ini diblokir ADMIN.':m==='INVALID_PASSWORD'?'Password salah.':m==='USER_NOT_FOUND'?'Username belum terdaftar. Hubungi ADMIN.':m);
       }
     }catch(e){
       if(msgEl)msgEl.textContent='❌ Gagal menghubungi CENTRAL. Periksa koneksi internet.';
@@ -4884,13 +4884,40 @@ renderAreas();
     if(!box){
       box=document.createElement('div');box.id='sttUserAccessManager';box.className='card';box.style.cssText='margin-top:16px;border-left:5px solid #0b3d91;display:none';
       box.innerHTML=`<h3 style="margin:0 0 8px;color:var(--primary)">🔐 USER ACCESS CONTROL</h3>
-        <div class="small">Akun dibuat otomatis saat login pertama kali. ADMIN mutlak menentukan ALLOWED / BLOCKED tiap username di sini.</div>
+        <div class="small">Akun HANYA bisa dibuat/reset password oleh ADMIN di sini. ADMIN mutlak menentukan ALLOWED / BLOCKED tiap username.</div>
+        <div style="margin-top:12px;padding:12px;background:#f1f5f9;border-radius:12px">
+          <div class="small" style="margin-bottom:6px"><b>➕ Buat / Reset User</b></div>
+          <input id="ugNewUser" class="dac-input" placeholder="Username" autocomplete="off" style="margin-bottom:8px">
+          <input id="ugNewPass" class="dac-input" type="text" placeholder="Password (min 4 karakter)" autocomplete="off">
+          <button id="ugCreateBtn" type="button" class="btn btn-primary" style="margin-top:8px;width:100%">💾 SIMPAN USER</button>
+          <div id="ugCreateMsg" class="small" style="margin-top:6px"></div>
+        </div>
         <div id="ugUserList" style="margin-top:12px"></div>
         <button id="ugListRefresh" type="button" class="btn btn-ghost" style="margin-top:8px">↻ REFRESH DAFTAR USER</button>`;
       admin.appendChild(box);
       box.querySelector('#ugListRefresh').onclick=loadUserList;
+      box.querySelector('#ugCreateBtn').onclick=submitCreateUser;
     }
     updateAdminPanel();
+  }
+
+  async function submitCreateUser(){
+    const box=document.getElementById('sttUserAccessManager');if(!box)return;
+    const uEl=box.querySelector('#ugNewUser'),pEl=box.querySelector('#ugNewPass'),msgEl=box.querySelector('#ugCreateMsg'),btn=box.querySelector('#ugCreateBtn');
+    const username=(uEl&&uEl.value||'').trim(),password=(pEl&&pEl.value||'').trim();
+    if(msgEl)msgEl.textContent='';
+    if(!username||password.length<4){if(msgEl){msgEl.textContent='Username & password (min 4) wajib diisi.';msgEl.style.color='#b42318';}return;}
+    if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
+    if(btn){btn.disabled=true;btn.textContent='⏳ MENYIMPAN...';}
+    try{
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'ADMIN_CREATE_USER',username:username,password:password,admin_session:adminSessionToken||''}).toString()});
+      const j=await r.json();
+      if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal menyimpan user.');
+      if(msgEl){msgEl.textContent='✅ User "'+username+'" tersimpan.';msgEl.style.color='#059669';}
+      if(uEl)uEl.value='';if(pEl)pEl.value='';
+      loadUserList();
+    }catch(e){if(msgEl){msgEl.textContent='❌ '+e.message;msgEl.style.color='#b42318';}}
+    finally{if(btn){btn.disabled=false;btn.textContent='💾 SIMPAN USER';}}
   }
 
   async function loadUserList(){
