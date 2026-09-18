@@ -1895,13 +1895,13 @@ const fetchRetry = window.fetchRetry;
 // GANTI URL LOGO DEFAULT DI SINI:
 const DEFAULT_LOGO_URL = "https://i.ibb.co.com/dJV2bjQR/IMG-20251123-001741.png";
 // MASTER BRANDING: edit nilai default ini langsung di stt.html bila diperlukan.
-const DEFAULT_COMPANY_NAME = "PT. NAMA PERUSAHAAN";
-const DEFAULT_COMPANY_ADDRESS = "Alamat lengkap perusahaan";
+const DEFAULT_COMPANY_NAME = "STT GDCI";
+const DEFAULT_COMPANY_ADDRESS = "Block EA No. 1, Greenland International Industrial Center (GIIC), Kota Deltamas, Kec. Cikarang Pusat, Kabupaten Bekasi, Jawa Barat 17530";
 const DEFAULT_LOGO_LEFT_URL = DEFAULT_LOGO_URL;
 const DEFAULT_LOGO_RIGHT_URL = DEFAULT_LOGO_URL;
 // ===== GAS CONFIG — GANTI URL GAS DI SINI SAJA =====
 // Semua fungsi backend (ADMIN, PDF upload, Finding Central) memakai URL ini.
-const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbwVph4batAy-ZvO8k80QWaFZrkK1i6OCOTbw3PHCbHGRQxYDmx_n6itA7tACWXXYe1a/exec"],CREATED_BY="Mbah Pri";
+const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbyu3pLYKtQ3htqwCjojgMepuU_rZqm6Zg9_xEO2wMf_V7QRwCJDUAhnlgShjhULqfM/exec"],CREATED_BY="Mbah Pri";
 const ADMIN_AUTH_ENDPOINT = GAS_API_ENDPOINTS[0];
 const PDF_UPLOAD_URL = GAS_API_ENDPOINTS[0];
 const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
@@ -4727,42 +4727,39 @@ renderAreas();
  });
 })();
 </script>
-<!-- STT DEVICE ACCESS CONTROL v3: central status + wajib kode aktivasi.
-     Device baru (PENDING) dan device yang diblokir (BLOCKED) sama-sama
-     mengunci total aplikasi DAN menyembunyikan gate suara/video di bawah
-     (#sttAppVideoGate) supaya urutannya selalu: aktivasi device dulu,
-     baru gate suara, baru masuk aplikasi. Hanya status ALLOWED yang
-     membuka akses — didapat lewat kode aktivasi (self-service) atau
-     tombol admin manual. -->
-<script id="STT_DEVICE_ACCESS_CONTROL_V2_CENTRAL">
+<!-- STT USER LOGIN GATE v1: ganti total device-lock/kode aktivasi.
+     Login username+password, self-register otomatis saat username baru
+     dipakai pertama kali. Kredensial disimpan lokal supaya tidak perlu
+     login ulang, tapi tiap buka app diverifikasi silent ke CENTRAL —
+     kalau admin BLOKIR username, akses langsung terkunci di semua device
+     walau localStorage/cache masih ada. Admin (di panel admin) yang
+     mutlak menentukan status allowed/blocked tiap username. -->
+<script id="STT_USER_LOGIN_GATE_V1">
 (function(){
   'use strict';
   const CENTRAL=(typeof STT_FINDING_CENTRAL_URL==='string'&&STT_FINDING_CENTRAL_URL.trim())?STT_FINDING_CENTRAL_URL.trim():'';
-  const STATUS_KEY='STT_DEVICE_ACCESS_STATUS_V2';
-  const deviceId=window.STT_DEVICE_ID || (localStorage.getItem('STT_INSTALLATION_ID_V1')||'');
-  let status='pending', timer=null, checking=false;
-  const norm=v=>String(v||'pending').toLowerCase().trim();
-  const cache=v=>{status=norm(v);try{localStorage.setItem(STATUS_KEY,status)}catch(e){}};
-  const cached=()=>{try{return norm(localStorage.getItem(STATUS_KEY)||'pending')}catch(e){return 'pending'}};
-  status=cached();
+  const CREDS_KEY='STT_USER_CREDS_V1';
+  let status='guest', timer=null, checking=false, submitting=false;
 
-  let activating=false;
+  const loadCreds=()=>{try{return JSON.parse(localStorage.getItem(CREDS_KEY)||'null')}catch(e){return null}};
+  const saveCreds=(u,p)=>{try{localStorage.setItem(CREDS_KEY,JSON.stringify({u:u,p:p}))}catch(e){}};
+  const clearCreds=()=>{try{localStorage.removeItem(CREDS_KEY)}catch(e){}};
 
   function css(){
-    if(document.getElementById('sttDeviceAccessCssV2'))return;
-    const st=document.createElement('style');st.id='sttDeviceAccessCssV2';
+    if(document.getElementById('sttUserGateCssV1'))return;
+    const st=document.createElement('style');st.id='sttUserGateCssV1';
     st.textContent=`
-      body.stt-device-locked>*:not(#sttDeviceBlockedGate){pointer-events:none!important;user-select:none!important}
-      #sttDeviceBlockedGate{position:fixed;inset:0;z-index:2147483647;background:rgba(3,12,30,.96);display:flex;align-items:center;justify-content:center;padding:22px;box-sizing:border-box}
-      #sttDeviceBlockedGate .dac-card{width:min(440px,100%);background:#fff;border-radius:22px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.4);font-family:inherit;text-align:center}
-      #sttDeviceBlockedGate h2{margin:0 0 10px;color:#b42318;font-size:23px}
-      #sttDeviceBlockedGate p{color:#475569;line-height:1.55;margin:8px 0}
-      #sttDeviceBlockedGate .dac-id{background:#f1f5f9;border-radius:12px;padding:12px;font-weight:800;word-break:break-all;margin:14px 0}
-      #sttDeviceBlockedGate .dac-msg{font-size:13px;color:#64748b;min-height:20px;margin-top:8px;white-space:pre-line}
-      #sttDeviceBlockedGate .dac-input{width:100%;box-sizing:border-box;padding:13px;border:2px solid #cbd5e1;border-radius:12px;font-size:16px;font-weight:700;margin-top:10px}
-      #sttDeviceBlockedGate .dac-input:focus{outline:none;border-color:#0b3d91}
-      #sttDeviceBlockedGate .dac-btn{width:100%;border:0;border-radius:12px;padding:13px;margin-top:12px;font-weight:800;font-size:15px;background:#0b3d91;color:#fff;cursor:pointer}
-      #sttDeviceBlockedGate .dac-btn:disabled{opacity:.6;cursor:default}
+      body.stt-user-locked>*:not(#sttUserGate){pointer-events:none!important;user-select:none!important}
+      #sttUserGate{position:fixed;inset:0;z-index:2147483647;background:rgba(3,12,30,.96);display:flex;align-items:center;justify-content:center;padding:22px;box-sizing:border-box}
+      #sttUserGate .dac-card{width:min(420px,100%);background:#fff;border-radius:22px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.4);font-family:inherit;text-align:center}
+      #sttUserGate h2{margin:0 0 10px;color:#0b3d91;font-size:22px}
+      #sttUserGate p{color:#475569;line-height:1.55;margin:8px 0;font-size:13.5px}
+      #sttUserGate .dac-msg{font-size:13px;color:#b42318;min-height:20px;margin-top:8px;white-space:pre-line;font-weight:700}
+      #sttUserGate .dac-input{width:100%;box-sizing:border-box;padding:13px;border:2px solid #cbd5e1;border-radius:12px;font-size:16px;font-weight:700;margin-top:10px}
+      #sttUserGate .dac-input:focus{outline:none;border-color:#0b3d91}
+      #sttUserGate .dac-btn{width:100%;border:0;border-radius:12px;padding:13px;margin-top:12px;font-weight:800;font-size:15px;background:#0b3d91;color:#fff;cursor:pointer}
+      #sttUserGate .dac-btn:disabled{opacity:.6;cursor:default}
+      #sttUserGate .dac-btn2{width:100%;border:0;border-radius:12px;padding:11px;margin-top:8px;font-weight:700;font-size:13px;background:#b42318;color:#fff;cursor:pointer}
     `;
     document.head.appendChild(st);
   }
@@ -4770,207 +4767,180 @@ renderAreas();
   function gateHTML(kind){
     if(kind==='blocked'){
       return `<div class="dac-card">
-        <h2>🚫 PERANGKAT DIBLOKIR</h2>
-        <p>Perangkat ini diblokir oleh ADMIN melalui CENTRAL. Hubungi ADMIN untuk mengaktifkan kembali perangkat ini.</p>
-        <div class="dac-id">Installation ID<br><span id="dacBlockedId"></span></div>
-        <button id="dacBlockedRetry" type="button" class="dac-btn">CEK ULANG STATUS</button>
-        <div id="dacBlockedMsg" class="dac-msg"></div>
+        <h2>🚫 AKUN DIBLOKIR</h2>
+        <p>Akun ini diblokir oleh ADMIN. Hubungi ADMIN untuk mengaktifkan kembali.</p>
+        <button id="ugRetry" type="button" class="dac-btn">CEK ULANG STATUS</button>
+        <button id="ugLogout" type="button" class="dac-btn2">GANTI AKUN</button>
+        <div id="ugMsg" class="dac-msg"></div>
       </div>`;
     }
     return `<div class="dac-card">
-      <h2>🔒 PERANGKAT BELUM DIAKTIFKAN</h2>
-      <p>Perangkat baru otomatis terkunci. Hubungi ADMIN untuk minta izin + <b>Kode Aktivasi</b>, lalu masukkan di bawah ini.</p>
-      <div class="dac-id">Installation ID<br><span id="dacBlockedId"></span></div>
-      <input id="dacActUser" class="dac-input" placeholder="Username / Nama Anda" autocomplete="off">
-      <input id="dacActCode" class="dac-input" placeholder="Kode Aktivasi" autocomplete="off" autocapitalize="characters">
-      <button id="dacActSubmit" type="button" class="dac-btn">🔓 AKTIVASI PERANGKAT</button>
-      <div id="dacBlockedMsg" class="dac-msg"></div>
+      <h2>🔐 LOGIN PETUGAS</h2>
+      <p>Masukkan Username &amp; Password. Kalau username belum pernah dipakai, akun baru otomatis dibuat.</p>
+      <input id="ugUser" class="dac-input" placeholder="Username" autocomplete="off">
+      <input id="ugPass" class="dac-input" type="password" placeholder="Password (min 4 karakter)" autocomplete="off">
+      <button id="ugSubmit" type="button" class="dac-btn">🔓 MASUK</button>
+      <div id="ugMsg" class="dac-msg"></div>
     </div>`;
   }
 
   function lockGate(kind){
-    css(); document.body.classList.add('stt-device-locked');
-    // Sembunyikan gate video sementara device belum ALLOWED, supaya urutan
-    // yang dilihat user selalu: aktivasi device dulu, baru gate suara/video.
+    css(); document.body.classList.add('stt-user-locked');
     const vg=document.getElementById('sttAppVideoGate');if(vg)vg.style.display='none';
-    let el=document.getElementById('sttDeviceBlockedGate');
+    let el=document.getElementById('sttUserGate');
     if(!el||el.dataset.kind!==kind){
       if(el)el.remove();
-      el=document.createElement('div');el.id='sttDeviceBlockedGate';el.dataset.kind=kind;
+      el=document.createElement('div');el.id='sttUserGate';el.dataset.kind=kind;
       el.innerHTML=gateHTML(kind);
       document.body.appendChild(el);
-      el.querySelector('#dacBlockedId').textContent=deviceId||'UNKNOWN';
       if(kind==='blocked'){
-        el.querySelector('#dacBlockedRetry').onclick=()=>checkCentral(true);
+        el.querySelector('#ugRetry').onclick=()=>checkCentral(true);
+        el.querySelector('#ugLogout').onclick=()=>{if(confirm('Ganti akun? Kamu perlu login ulang.')){clearCreds();apply('guest')}};
       }else{
-        el.querySelector('#dacActSubmit').onclick=submitActivation;
-        el.querySelector('#dacActCode').addEventListener('keydown',e=>{if(e.key==='Enter')submitActivation();});
+        el.querySelector('#ugSubmit').onclick=submitLogin;
+        el.querySelector('#ugPass').addEventListener('keydown',e=>{if(e.key==='Enter')submitLogin();});
       }
     }
   }
 
   function unlock(){
-    document.body.classList.remove('stt-device-locked');
-    const el=document.getElementById('sttDeviceBlockedGate');if(el)el.remove();
-    // Device sudah ALLOWED: tampilkan lagi gate suara/video (kalau belum
-    // pernah diselesaikan user — kalau sudah, elemennya sudah dihapus sendiri).
+    document.body.classList.remove('stt-user-locked');
+    const el=document.getElementById('sttUserGate');if(el)el.remove();
     const vg=document.getElementById('sttAppVideoGate');if(vg)vg.style.display='';
   }
 
   function apply(v){
-    v=norm(v); status=v; cache(v);
-    // Hanya status ALLOWED yang boleh membuka aplikasi.
-    // PENDING (device baru) dan BLOCKED (dicabut admin) sama-sama mengunci total.
-    if(v==='blocked') lockGate('blocked');
-    else if(v==='allowed') unlock();
-    else lockGate('pending');
+    status=v;
+    if(v==='blocked')lockGate('blocked');
+    else if(v==='allowed')unlock();
+    else lockGate('guest');
     updateAdminPanel();
   }
 
-  async function submitActivation(){
-    if(activating)return;
-    const el=document.getElementById('sttDeviceBlockedGate');if(!el)return;
-    const userEl=el.querySelector('#dacActUser'),codeEl=el.querySelector('#dacActCode'),msgEl=el.querySelector('#dacBlockedMsg'),btn=el.querySelector('#dacActSubmit');
-    const userName=(userEl&&userEl.value||'').trim();
-    const code=(codeEl&&codeEl.value||'').trim();
+  async function submitLogin(){
+    if(submitting)return;
+    const el=document.getElementById('sttUserGate');if(!el)return;
+    const userEl=el.querySelector('#ugUser'),passEl=el.querySelector('#ugPass'),msgEl=el.querySelector('#ugMsg'),btn=el.querySelector('#ugSubmit');
+    const username=(userEl&&userEl.value||'').trim();
+    const password=(passEl&&passEl.value||'');
     if(msgEl)msgEl.textContent='';
-    if(!code){if(msgEl)msgEl.textContent='Kode aktivasi wajib diisi.';return;}
+    if(!username||!password){if(msgEl)msgEl.textContent='Username & password wajib diisi.';return;}
+    if(password.length<4){if(msgEl)msgEl.textContent='Password minimal 4 karakter.';return;}
     if(!CENTRAL){if(msgEl)msgEl.textContent='URL CENTRAL belum dipasang.';return;}
-    activating=true;if(btn){btn.disabled=true;btn.textContent='⏳ MEMERIKSA...';}
+    submitting=true;if(btn){btn.disabled=true;btn.textContent='⏳ MEMERIKSA...';}
     try{
-      if(userName){try{localStorage.setItem('stt_user_name',userName)}catch(e){}}
-      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'DEVICE_ACTIVATE',installation_id:deviceId,activation_code:code,user_name:userName,app:'STT',device:navigator.userAgent||'',android:navigator.userAgent||'',app_version:window.STT_APP_VERSION||''}).toString()});
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'USER_LOGIN',username:username,password:password}).toString()});
       const j=await r.json();
-      const d=j&&(j.data||j.device||j);
-      const st=norm(d&&d.status);
-      if(j&&j.ok!==false&&st==='allowed'){
+      if(j&&j.ok!==false&&String(j.status||'').toLowerCase()==='allowed'){
+        saveCreds(username,password);
+        try{localStorage.setItem('stt_user_name',username)}catch(e){}
         apply('allowed');
       }else{
-        const m=(j&&(j.message||j.error))||'Kode aktivasi salah.';
-        if(msgEl)msgEl.textContent='❌ '+m;
+        const m=(j&&(j.message||j.error))||'Login gagal.';
+        if(msgEl)msgEl.textContent='❌ '+(m==='USER_BLOCKED'?'Akun ini diblokir ADMIN.':m==='INVALID_PASSWORD'?'Password salah.':m);
       }
     }catch(e){
       if(msgEl)msgEl.textContent='❌ Gagal menghubungi CENTRAL. Periksa koneksi internet.';
     }finally{
-      activating=false;
-      const btn2=document.getElementById('dacActSubmit');
-      if(btn2){btn2.disabled=false;btn2.textContent='🔓 AKTIVASI PERANGKAT';}
+      submitting=false;
+      const btn2=document.getElementById('ugSubmit');
+      if(btn2){btn2.disabled=false;btn2.textContent='🔓 MASUK';}
     }
   }
 
   async function checkCentral(showMsg){
     if(checking)return;
-    if(!CENTRAL){
-      // URL backend belum dipasang: jangan kunci, supaya masih bisa dites/setup.
-      apply(status==='blocked'?'blocked':'allowed');
-      return;
-    }
+    const creds=loadCreds();
+    if(!creds||!creds.u||!creds.p){apply('guest');return;}
+    if(!CENTRAL){apply('allowed');return;} // belum dipasang: jangan kunci, supaya masih bisa dites/setup.
     checking=true;
     try{
-      const url=CENTRAL+(CENTRAL.includes('?')?'&':'?')+'action=DEVICE_CHECK&installation_id='+encodeURIComponent(deviceId)+'&user_name='+encodeURIComponent(localStorage.getItem('stt_user_name')||'')+'&app=STT&device='+encodeURIComponent(navigator.userAgent||'')+'&android='+encodeURIComponent(navigator.userAgent||'')+'&app_version='+encodeURIComponent(window.STT_APP_VERSION||'');
-      const r=await fetch(url,{cache:'no-store'});
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'USER_LOGIN',username:creds.u,password:creds.p}).toString()});
       const j=await r.json();
-      const d=j&&(j.data||j.device||j);
-      const st=norm(d&&d.status);
-      apply(st||'pending');
-      const m=document.getElementById('dacBlockedMsg');if(m&&status==='blocked')m.textContent='Status CENTRAL: '+(st||'PENDING').toUpperCase();
+      if(j&&j.ok!==false&&String(j.status||'').toLowerCase()==='allowed'){
+        apply('allowed');
+      }else if(j&&String(j.message||j.error||'')==='USER_BLOCKED'){
+        apply('blocked');
+      }else{
+        // password lokal tidak lagi cocok (misal akun diganti manual di sheet) -> minta login ulang
+        clearCreds();apply('guest');
+      }
     }catch(e){
-      // Kegagalan jaringan TIDAK BOLEH menurunkan status device yang sudah ALLOWED
-      // (biarkan status tercache tetap dipakai, coba lagi di siklus berikutnya).
-      const m=document.getElementById('dacBlockedMsg');if(m)m.textContent='CENTRAL belum dapat dihubungi. Coba lagi.';
+      // Kegagalan jaringan TIDAK BOLEH menurunkan status yang sudah ALLOWED.
+      if(status!=='allowed')apply(status);
+      const m=document.getElementById('ugMsg');if(m)m.textContent='CENTRAL belum dapat dihubungi. Coba lagi.';
     }finally{checking=false;}
   }
 
-  function centralSetStatus(newStatus){
-    if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
-    const key=adminSessionToken||'';
-    fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'DEVICE_SET_STATUS',installation_id:deviceId,status:newStatus,admin_session:key}).toString()})
-      .then(r=>r.json()).then(j=>{if(!j||j.ok===false)throw new Error(j&&j.error||'Gagal mengubah status');apply(newStatus);alert(newStatus==='allowed'?'✅ Device diizinkan.':'🚫 Device diblokir.');})
-      .catch(e=>alert('❌ Gagal mengubah status CENTRAL: '+e.message));
-  }
-
   function updateAdminPanel(){
-    const box=document.getElementById('sttDeviceAccessManager');if(!box)return;
+    const box=document.getElementById('sttUserAccessManager');if(!box)return;
     box.style.display=window.adminUnlocked?'block':'none';
-    const st=box.querySelector('#dacAdminStatus');if(st)st.textContent='STATUS CENTRAL: '+String(status||'pending').toUpperCase();
+    if(window.adminUnlocked)loadUserList();
   }
 
   function installAdminControls(){
     const admin=document.getElementById('adminSection');if(!admin)return;
-    let box=document.getElementById('sttDeviceAccessManager');
+    let box=document.getElementById('sttUserAccessManager');
     if(!box){
-      box=document.createElement('div');box.id='sttDeviceAccessManager';box.className='card';box.style.cssText='margin-top:16px;border-left:5px solid #b42318;display:none';
-      box.innerHTML=`<h3 style="margin:0 0 8px;color:var(--primary)">🔐 DEVICE ACCESS CONTROL</h3>
-        <div class="small">Device baru otomatis TERKUNCI dan wajib memasukkan Kode Aktivasi. Tombol di bawah untuk override manual (izinkan paksa / blokir) khusus device ini.</div>
-        <div style="margin:10px 0"><b>Installation ID:</b><div id="dacAdminId" style="font-weight:800;word-break:break-all;margin-top:5px"></div></div>
-        <div id="dacAdminStatus" style="font-weight:800;margin:8px 0">STATUS CENTRAL: PENDING</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button id="dacAllowBtn" type="button" class="btn btn-primary">✅ IZINKAN DEVICE INI</button>
-          <button id="dacBlockBtn" type="button" class="btn btn-danger">🚫 BLOKIR DEVICE INI</button>
-        </div>
-        <div style="margin:16px 0 0;padding:12px;background:#f1f5f9;border-radius:12px">
-          <div class="small" style="margin-bottom:6px"><b>🔑 Kode Aktivasi Saat Ini</b><br>Dibagikan ke petugas/device baru supaya bisa aktivasi sendiri.</div>
-          <div id="dacActCodeBox" style="font-weight:800;font-size:20px;letter-spacing:1px;word-break:break-all">••••••••</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-            <button id="dacShowCodeBtn" type="button" class="btn btn-ghost">👁 TAMPILKAN KODE</button>
-            <button id="dacRotateCodeBtn" type="button" class="btn btn-warning">🔄 GANTI KODE</button>
-          </div>
-        </div>`;
+      box=document.createElement('div');box.id='sttUserAccessManager';box.className='card';box.style.cssText='margin-top:16px;border-left:5px solid #0b3d91;display:none';
+      box.innerHTML=`<h3 style="margin:0 0 8px;color:var(--primary)">🔐 USER ACCESS CONTROL</h3>
+        <div class="small">Akun dibuat otomatis saat login pertama kali. ADMIN mutlak menentukan ALLOWED / BLOCKED tiap username di sini.</div>
+        <div id="ugUserList" style="margin-top:12px"></div>
+        <button id="ugListRefresh" type="button" class="btn btn-ghost" style="margin-top:8px">↻ REFRESH DAFTAR USER</button>`;
       admin.appendChild(box);
-      box.querySelector('#dacAllowBtn').onclick=()=>centralSetStatus('allowed');
-      box.querySelector('#dacBlockBtn').onclick=()=>{if(confirm('Blokir device ini melalui CENTRAL?'))centralSetStatus('blocked');};
-      box.querySelector('#dacShowCodeBtn').onclick=loadActivationCode;
-      box.querySelector('#dacRotateCodeBtn').onclick=rotateActivationCode;
+      box.querySelector('#ugListRefresh').onclick=loadUserList;
     }
-    const idEl=box.querySelector('#dacAdminId');if(idEl)idEl.textContent=deviceId||'UNKNOWN';
     updateAdminPanel();
   }
 
-  async function loadActivationCode(){
-    if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
-    const box=document.getElementById('sttDeviceAccessManager');
-    const codeBox=box&&box.querySelector('#dacActCodeBox');
+  async function loadUserList(){
+    if(!CENTRAL)return;
+    const box=document.getElementById('sttUserAccessManager');const list=box&&box.querySelector('#ugUserList');if(!list)return;
+    list.textContent='⏳ Memuat...';
     try{
-      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'GET_ACTIVATION_CODE',admin_session:adminSessionToken||''}).toString()});
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'LIST_USERS',admin_session:adminSessionToken||''}).toString()});
       const j=await r.json();
-      if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal mengambil kode.');
-      if(codeBox)codeBox.textContent=j.activation_code||'-';
-    }catch(e){alert('❌ '+e.message);}
+      if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal memuat daftar user.');
+      const data=Array.isArray(j.data)?j.data:[];
+      if(!data.length){list.innerHTML='<div class="small">Belum ada user.</div>';return;}
+      list.innerHTML=data.map(u=>{
+        const blocked=String(u.status||'').toLowerCase()==='blocked';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid #e2e8f0">
+          <div><b>${esc_(u.username)}</b><div class="small">${blocked?'🚫 BLOCKED':'✅ ALLOWED'} • login terakhir: ${esc_(u.last_login||'-')}</div></div>
+          <div style="display:flex;gap:6px">
+            <button type="button" class="btn btn-primary" style="padding:6px 10px" onclick="window.STT_USER_ACCESS.setStatus('${esc_(u.username)}','allowed')" ${blocked?'':'disabled'}>ALLOW</button>
+            <button type="button" class="btn btn-danger" style="padding:6px 10px" onclick="window.STT_USER_ACCESS.setStatus('${esc_(u.username)}','blocked')" ${blocked?'disabled':''}>BLOCK</button>
+          </div>
+        </div>`;
+      }).join('');
+    }catch(e){list.innerHTML='<div class="small" style="color:#b42318">❌ '+esc_(e.message)+'</div>';}
   }
+  function esc_(v){return String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 
-  async function rotateActivationCode(){
+  async function setUserStatus(username,newStatus){
     if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
-    if(!confirm('Ganti kode aktivasi sekarang? Kode lama tidak akan berlaku lagi untuk device baru.'))return;
-    const custom=prompt('Masukkan kode aktivasi baru (kosongkan untuk dibuatkan otomatis):','');
-    if(custom===null)return;
     try{
-      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'ROTATE_ACTIVATION_CODE',new_code:custom.trim(),admin_session:adminSessionToken||''}).toString()});
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'SET_USER_STATUS',username:username,status:newStatus,admin_session:adminSessionToken||''}).toString()});
       const j=await r.json();
-      if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal mengganti kode.');
-      const box=document.getElementById('sttDeviceAccessManager');
-      const codeBox=box&&box.querySelector('#dacActCodeBox');
-      if(codeBox)codeBox.textContent=j.activation_code||'-';
-      alert('✅ Kode aktivasi baru: '+j.activation_code+'\n\nSegera bagikan ke petugas yang berwenang.');
+      if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal mengubah status');
+      loadUserList();
     }catch(e){alert('❌ '+e.message);}
   }
 
   document.addEventListener('DOMContentLoaded',()=>{
     css();
-    // Terapkan status tercache dulu (device baru = pending = langsung terkunci),
-    // baru cek ulang ke CENTRAL di background untuk konfirmasi/refresh status.
-    apply(cached());
+    const creds=loadCreds();
+    apply(creds&&creds.u?'allowed':'guest'); // optimis: tampilkan app dulu, verifikasi background
     setTimeout(()=>checkCentral(false),400);
     timer=setInterval(()=>checkCentral(false),30000);
     setTimeout(installAdminControls,900);
     setInterval(installAdminControls,2000);
   });
 
-  window.STT_DEVICE_ACCESS={
+  window.STT_USER_ACCESS={
     getStatus:()=>status,
-    setStatus:apply,
-    allow:()=>centralSetStatus('allowed'),
-    block:()=>centralSetStatus('blocked'),
-    getId:()=>deviceId,
+    setStatus:setUserStatus,
+    logout:()=>{clearCreds();apply('guest')},
     check:()=>checkCentral(true)
   };
 })();
