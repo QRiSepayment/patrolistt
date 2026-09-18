@@ -1901,7 +1901,7 @@ const DEFAULT_LOGO_LEFT_URL = DEFAULT_LOGO_URL;
 const DEFAULT_LOGO_RIGHT_URL = DEFAULT_LOGO_URL;
 // ===== GAS CONFIG — GANTI URL GAS DI SINI SAJA =====
 // Semua fungsi backend (ADMIN, PDF upload, Finding Central) memakai URL ini.
-const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbyu3pLYKtQ3htqwCjojgMepuU_rZqm6Zg9_xEO2wMf_V7QRwCJDUAhnlgShjhULqfM/exec"],CREATED_BY="Mbah Pri";
+const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbyti_2OgdWpRjcg-a2y9QUkdpufUNZbos5Ut3wi8NDnckG8k5eCpoK4JUH77K9uyNE-/exec"],CREATED_BY="Mbah Pri";
 const ADMIN_AUTH_ENDPOINT = GAS_API_ENDPOINTS[0];
 const PDF_UPLOAD_URL = GAS_API_ENDPOINTS[0];
 const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
@@ -4739,11 +4739,15 @@ renderAreas();
   'use strict';
   const CENTRAL=(typeof STT_FINDING_CENTRAL_URL==='string'&&STT_FINDING_CENTRAL_URL.trim())?STT_FINDING_CENTRAL_URL.trim():'';
   const CREDS_KEY='STT_USER_CREDS_V1';
+  const BYPASS_KEY='STT_ADMIN_BYPASS_V1';
   let status='guest', timer=null, checking=false, submitting=false;
+  let adminBypass=false;
+  try{adminBypass=localStorage.getItem(BYPASS_KEY)==='1'}catch(e){}
 
   const loadCreds=()=>{try{return JSON.parse(localStorage.getItem(CREDS_KEY)||'null')}catch(e){return null}};
   const saveCreds=(u,p)=>{try{localStorage.setItem(CREDS_KEY,JSON.stringify({u:u,p:p}))}catch(e){}};
   const clearCreds=()=>{try{localStorage.removeItem(CREDS_KEY)}catch(e){}};
+  const setAdminBypass=(v)=>{adminBypass=!!v;try{v?localStorage.setItem(BYPASS_KEY,'1'):localStorage.removeItem(BYPASS_KEY)}catch(e){}};
 
   function css(){
     if(document.getElementById('sttUserGateCssV1'))return;
@@ -4781,7 +4785,23 @@ renderAreas();
       <input id="ugPass" class="dac-input" type="password" placeholder="Password (min 4 karakter)" autocomplete="off">
       <button id="ugSubmit" type="button" class="dac-btn">🔓 MASUK</button>
       <div id="ugMsg" class="dac-msg"></div>
+      <button id="ugAdminKey" type="button" class="dac-btn2" style="background:#0b3d91">👑 MASUK SEBAGAI ADMIN (pertama kali)</button>
     </div>`;
+  }
+
+  async function submitAdminKey(){
+    const pw=prompt('Masukkan KUNCI ADMIN (bukan username/password petugas):');
+    if(!pw)return;
+    if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
+    try{
+      const j=await adminApi('AUTH_ADMIN',{password:pw});
+      adminSessionToken=String(j.session_token||'');
+      if(!adminSessionToken)throw new Error('Backend tidak mengembalikan sesi ADMIN.');
+      setAdminBypass(true);
+      apply('allowed');
+      try{setAdminUi(true)}catch(e){}
+      alert('✅ ADMIN aktif. Sekarang buat akun ADMIN kamu sendiri di panel USER ACCESS CONTROL supaya tidak perlu pakai kunci ini lagi.');
+    }catch(e){alert('❌ '+(e.message||'Kunci ADMIN salah.'));}
   }
 
   function lockGate(kind){
@@ -4795,10 +4815,11 @@ renderAreas();
       document.body.appendChild(el);
       if(kind==='blocked'){
         el.querySelector('#ugRetry').onclick=()=>checkCentral(true);
-        el.querySelector('#ugLogout').onclick=()=>{if(confirm('Ganti akun? Kamu perlu login ulang.')){clearCreds();apply('guest')}};
+        el.querySelector('#ugLogout').onclick=()=>{if(confirm('Ganti akun? Kamu perlu login ulang.')){clearCreds();setAdminBypass(false);apply('guest')}};
       }else{
         el.querySelector('#ugSubmit').onclick=submitLogin;
         el.querySelector('#ugPass').addEventListener('keydown',e=>{if(e.key==='Enter')submitLogin();});
+        el.querySelector('#ugAdminKey').onclick=submitAdminKey;
       }
     }
   }
@@ -4834,6 +4855,7 @@ renderAreas();
       if(j&&j.ok!==false&&String(j.status||'').toLowerCase()==='allowed'){
         saveCreds(username,password);
         try{localStorage.setItem('stt_user_name',username)}catch(e){}
+        if(j.is_admin)setAdminBypass(true);
         apply('allowed');
       }else{
         const m=(j&&(j.message||j.error))||'Login gagal.';
@@ -4850,6 +4872,7 @@ renderAreas();
 
   async function checkCentral(showMsg){
     if(checking)return;
+    if(adminBypass){apply('allowed');return;} // ADMIN bypass: background check tidak boleh nge-lock ulang.
     const creds=loadCreds();
     if(!creds||!creds.u||!creds.p){apply('guest');return;}
     if(!CENTRAL){apply('allowed');return;} // belum dipasang: jangan kunci, supaya masih bisa dites/setup.
@@ -4889,6 +4912,7 @@ renderAreas();
           <div class="small" style="margin-bottom:6px"><b>➕ Buat / Reset User</b></div>
           <input id="ugNewUser" class="dac-input" placeholder="Username" autocomplete="off" style="margin-bottom:8px">
           <input id="ugNewPass" class="dac-input" type="text" placeholder="Password (min 4 karakter)" autocomplete="off">
+          <label class="small" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input id="ugNewIsAdmin" type="checkbox"> Jadikan ADMIN (bypass, tidak dikunci background check)</label>
           <button id="ugCreateBtn" type="button" class="btn btn-primary" style="margin-top:8px;width:100%">💾 SIMPAN USER</button>
           <div id="ugCreateMsg" class="small" style="margin-top:6px"></div>
         </div>
@@ -4903,18 +4927,18 @@ renderAreas();
 
   async function submitCreateUser(){
     const box=document.getElementById('sttUserAccessManager');if(!box)return;
-    const uEl=box.querySelector('#ugNewUser'),pEl=box.querySelector('#ugNewPass'),msgEl=box.querySelector('#ugCreateMsg'),btn=box.querySelector('#ugCreateBtn');
-    const username=(uEl&&uEl.value||'').trim(),password=(pEl&&pEl.value||'').trim();
+    const uEl=box.querySelector('#ugNewUser'),pEl=box.querySelector('#ugNewPass'),aEl=box.querySelector('#ugNewIsAdmin'),msgEl=box.querySelector('#ugCreateMsg'),btn=box.querySelector('#ugCreateBtn');
+    const username=(uEl&&uEl.value||'').trim(),password=(pEl&&pEl.value||'').trim(),isAdmin=!!(aEl&&aEl.checked);
     if(msgEl)msgEl.textContent='';
     if(!username||password.length<4){if(msgEl){msgEl.textContent='Username & password (min 4) wajib diisi.';msgEl.style.color='#b42318';}return;}
     if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
     if(btn){btn.disabled=true;btn.textContent='⏳ MENYIMPAN...';}
     try{
-      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'ADMIN_CREATE_USER',username:username,password:password,admin_session:adminSessionToken||''}).toString()});
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'ADMIN_CREATE_USER',username:username,password:password,is_admin:isAdmin?'true':'',admin_session:adminSessionToken||''}).toString()});
       const j=await r.json();
       if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal menyimpan user.');
-      if(msgEl){msgEl.textContent='✅ User "'+username+'" tersimpan.';msgEl.style.color='#059669';}
-      if(uEl)uEl.value='';if(pEl)pEl.value='';
+      if(msgEl){msgEl.textContent='✅ User "'+username+'" tersimpan.'+(isAdmin?' (ADMIN)':'');msgEl.style.color='#059669';}
+      if(uEl)uEl.value='';if(pEl)pEl.value='';if(aEl)aEl.checked=false;
       loadUserList();
     }catch(e){if(msgEl){msgEl.textContent='❌ '+e.message;msgEl.style.color='#b42318';}}
     finally{if(btn){btn.disabled=false;btn.textContent='💾 SIMPAN USER';}}
@@ -4933,7 +4957,7 @@ renderAreas();
       list.innerHTML=data.map(u=>{
         const blocked=String(u.status||'').toLowerCase()==='blocked';
         return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid #e2e8f0">
-          <div><b>${esc_(u.username)}</b><div class="small">${blocked?'🚫 BLOCKED':'✅ ALLOWED'} • login terakhir: ${esc_(u.last_login||'-')}</div></div>
+          <div><b>${esc_(u.username)}</b>${u.is_admin?' <span style="color:#0b3d91;font-weight:900">👑 ADMIN</span>':''}<div class="small">${blocked?'🚫 BLOCKED':'✅ ALLOWED'} • login terakhir: ${esc_(u.last_login||'-')}</div></div>
           <div style="display:flex;gap:6px">
             <button type="button" class="btn btn-primary" style="padding:6px 10px" onclick="window.STT_USER_ACCESS.setStatus('${esc_(u.username)}','allowed')" ${blocked?'':'disabled'}>ALLOW</button>
             <button type="button" class="btn btn-danger" style="padding:6px 10px" onclick="window.STT_USER_ACCESS.setStatus('${esc_(u.username)}','blocked')" ${blocked?'disabled':''}>BLOCK</button>
@@ -4967,7 +4991,7 @@ renderAreas();
   window.STT_USER_ACCESS={
     getStatus:()=>status,
     setStatus:setUserStatus,
-    logout:()=>{clearCreds();apply('guest')},
+    logout:()=>{clearCreds();setAdminBypass(false);apply('guest')},
     check:()=>checkCentral(true)
   };
 })();
