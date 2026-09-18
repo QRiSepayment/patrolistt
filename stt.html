@@ -1454,6 +1454,7 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
           <input id="adminAccessPassword" type="password" autocomplete="current-password" placeholder="Masukkan kunci ADMIN">
           <button id="adminUnlockBtn" type="button" class="btn btn-primary"><i class="fas fa-unlock"></i> BUKA ADMIN</button>
         </div>
+        <div id="adminUnlockMsg" class="small" style="margin-top:8px;min-height:18px"></div>
       </div>
       <div id="adminUnlockedView" style="display:none">
         <div class="admin-status"><i class="fas fa-shield-check"></i><span>ADMIN AKTIF — PENGATURAN TERBUKA</span></div>
@@ -1901,7 +1902,7 @@ const DEFAULT_LOGO_LEFT_URL = DEFAULT_LOGO_URL;
 const DEFAULT_LOGO_RIGHT_URL = DEFAULT_LOGO_URL;
 // ===== GAS CONFIG — GANTI URL GAS DI SINI SAJA =====
 // Semua fungsi backend (ADMIN, PDF upload, Finding Central) memakai URL ini.
-const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbyti_2OgdWpRjcg-a2y9QUkdpufUNZbos5Ut3wi8NDnckG8k5eCpoK4JUH77K9uyNE-/exec"],CREATED_BY="Mbah Pri";
+const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbyqN9kXPjvIKUwG7ylsrewa3jMkGCpmxk4xbNFV-HdPyVt8USuVWlQDomfLw2B5Ie6k/exec"],CREATED_BY="Mbah Pri";
 const ADMIN_AUTH_ENDPOINT = GAS_API_ENDPOINTS[0];
 const PDF_UPLOAD_URL = GAS_API_ENDPOINTS[0];
 const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
@@ -1956,8 +1957,18 @@ async function adminApi(action, payload={}){
   if(!endpoint) throw new Error('Backend ADMIN belum dikonfigurasi. Isi URL /exec Google Apps Script.');
   const body={action:String(action||'').toUpperCase(),...payload};
   if(adminSessionToken) body.admin_session=adminSessionToken;
-  const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(body),cache:'no-store'});
-  const j=await r.json();
+  const ctrl=new AbortController();
+  const timeoutId=setTimeout(()=>ctrl.abort(),15000); // anti hang: 15 detik
+  let r;
+  try{
+    r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(body),cache:'no-store',signal:ctrl.signal});
+  }catch(netErr){
+    if(netErr && netErr.name==='AbortError') throw new Error('TIMEOUT: backend tidak merespon 15 detik. Cek URL /exec & redeploy (New version).');
+    throw new Error('GAGAL_KONEKSI: '+(netErr?.message||netErr)+' — cek internet / URL GAS.');
+  }finally{clearTimeout(timeoutId);}
+  let j;
+  try{ j=await r.json(); }
+  catch(parseErr){ throw new Error('RESPON_BUKAN_JSON (HTTP '+r.status+'). Kemungkinan deployment GAS belum "New version" / akses "Anyone".'); }
   if(!j || j.status==='error' || j.ok===false) throw new Error(j?.message||j?.error||'ADMIN backend menolak permintaan.');
   return j;
 }
@@ -2912,19 +2923,23 @@ function setupSuperCleanup() {
   }
 
   document.getElementById('adminUnlockBtn')?.addEventListener('click',async()=>{
+    const msgEl=document.getElementById('adminUnlockMsg');
+    const setMsg=(t,ok)=>{ if(msgEl){ msgEl.textContent=t; msgEl.style.color=ok===true?'#16a34a':(ok===false?'#dc2626':'#64748b'); } };
     const value=document.getElementById('adminAccessPassword')?.value||'';
-    if(!value){alert('🔐 Masukkan kunci ADMIN.');return;}
+    if(!value){setMsg('🔐 Masukkan kunci ADMIN.',false);return;}
     const btn=document.getElementById('adminUnlockBtn'); if(btn) btn.disabled=true;
+    setMsg('⏳ Menghubungi backend ADMIN...',null);
     try{
       const j=await adminApi('AUTH_ADMIN',{password:value});
       adminSessionToken=String(j.session_token||'');
       if(!adminSessionToken) throw new Error('Backend tidak mengembalikan sesi ADMIN.');
       document.getElementById('adminAccessPassword').value='';
       setAdminUi(true);
-      alert('✅ ADMIN berhasil dibuka melalui backend.');
+      setMsg('✅ ADMIN berhasil dibuka.',true);
     }catch(err){
+      console.error('[ADMIN UNLOCK]',err);
       document.getElementById('adminAccessPassword').value='';
-      alert('❌ '+(err?.message||'Kunci ADMIN salah.'));
+      setMsg('❌ '+(err?.message||'Kunci ADMIN salah.'),false);
       setAdminUi(false);
     }finally{if(btn)btn.disabled=false;}
   });
