@@ -32,37 +32,39 @@ function dateFmt(v){if(!v)return '-';const d=new Date(v);return isNaN(d)?String(
 function timeFmt(v){if(!v)return '-';const d=new Date(v);return isNaN(d)?String(v):d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 
 /* ============================================================
-   [FIX #1] jsonGet — nonce unik + 3x retry + no-cache header
-   Masalah lama: Google CDN & browser kadang serve respons lama
-   untuk /exec, sehingga device B tidak dapat data terbaru.
+   [FIX #1] jsonGet — TANPA custom header (hindari preflight OPTIONS)
+   Custom header seperti Cache-Control/Pragma/Expires memicu preflight
+   OPTIONS yang DITOLAK Apps Script → "Failed to fetch" di HP Android.
+   Solusi: kirim header minimal, andalkan query param nonce untuk cache-busting.
+   Plus 5x retry dengan backoff untuk koneksi 4G lapangan yang sering drop.
    ============================================================ */
 async function jsonGet(action, params={}){
-  if(!API) throw Error('URL GAS belum diisi di source finding-notes.html.');
-  // Cache-buster kuat: timestamp + random + versi
+  if(!API) throw Error('URL GAS belum diisi.');
   const nonce = Date.now() + '_' + Math.random().toString(36).slice(2, 12);
-  const q = new URLSearchParams({ action, ...params, t: nonce, _: nonce, v: '17' });
+  const q = new URLSearchParams({ action, ...params, t: nonce, _: nonce, v: '18' });
   let lastErr;
-  for(let attempt = 0; attempt < 3; attempt++){          // ← 3x retry (bukan 2x)
+  for(let attempt = 0; attempt < 5; attempt++){
     try{
       const r = await fetch(API + '?' + q.toString(), {
         cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        }
+        mode: 'cors',
+        credentials: 'omit',
+        headers: { 'Accept': 'application/json' }
       });
+      if(!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       if(j.status !== 'success' && j.status !== 'pending')
         throw Error(j.message || 'Central error');
       return j;
     }catch(e){
       lastErr = e;
-      if(attempt < 2) await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+      // Jangan retry kalau errornya dari server (bukan network)
+      if(/INVALID|NOT_FOUND|REQUIRED/i.test(String(e.message))) throw e;
+      if(attempt < 4) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
     }
   }
   throw Error(/json/i.test(String(lastErr && lastErr.message))
-    ? 'Central sedang sibuk (limit Google sesaat), coba lagi.'
+    ? 'Central sibuk (limit Google sesaat), coba lagi.'
     : (lastErr && lastErr.message) || 'Central error');
 }
 
@@ -73,17 +75,14 @@ function postForm(data,timeoutMs){return new Promise((res,rej)=>{
   const f=document.createElement('form');f.method='POST';f.action=API;f.target=id;f.style.display='none';
   for(const [k,v] of Object.entries(data)){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=String(v??'');f.appendChild(i)}
   let done=false;const finish=e=>{if(done)return;done=true;clearTimeout(t);iframe.remove();f.remove();e?rej(e):res(true)};
-  // Timeout dibuat lebih panjang (default 90 detik, foto bisa 3 menit) karena
-  // koneksi lapangan sering sangat lambat (kadang cuma belasan KB/s), jadi
-  // kirim data base64 foto ke Apps Script butuh waktu jauh lebih lama dari 20 detik.
   const t=setTimeout(()=>finish(Error('POST timeout — koneksi terlalu lambat')),timeoutMs||90000);
   iframe.onload=()=>setTimeout(()=>finish(),500);iframe.onerror=()=>finish(Error('POST gagal'));
   document.body.append(iframe,f);try{f.submit()}catch(e){finish(e)}
 })}
 function fileData(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',').pop());r.onerror=()=>rej(Error('Foto gagal dibaca'));r.readAsDataURL(file)})}
-// Kompres & resize foto di browser SEBELUM diubah ke base64. Foto kamera HP
-// biasanya 3-8MB; setelah ini biasanya jadi 150-400KB saja, sehingga jauh
-// lebih cepat dan tahan dikirim lewat koneksi lapangan yang lambat.
+// Kompres & resize foto di browser SEBELUM diubah ke base64.
+// [FIX] maxDim diturunkan 1600→1280, quality 0.72→0.65 → foto 80-150KB
+// supaya upload lebih tahan koneksi 4G yang sering drop.
 function compressImage(file,maxDim,quality){
   return new Promise((resolve)=>{
     const img=new Image();const url=URL.createObjectURL(file);
@@ -93,36 +92,53 @@ function compressImage(file,maxDim,quality){
         if(w>maxDim||h>maxDim){if(w>h){h=Math.round(h*maxDim/w);w=maxDim}else{w=Math.round(w*maxDim/h);h=maxDim}}
         const c=document.createElement('canvas');c.width=w;c.height=h;
         c.getContext('2d').drawImage(img,0,0,w,h);
-        c.toBlob(b=>{URL.revokeObjectURL(url);resolve(b?new File([b],file.name.replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):file)},'image/jpeg',quality||0.72);
+        c.toBlob(b=>{URL.revokeObjectURL(url);resolve(b?new File([b],file.name.replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):file)},'image/jpeg',quality||0.65);
       }catch(_){URL.revokeObjectURL(url);resolve(file)}
     };
     img.onerror=()=>{URL.revokeObjectURL(url);resolve(file)};
     img.src=url;
   });
 }
+
+/* ============================================================
+   [FIX #2] upload — 3x retry + polling 500ms + tahan error polling
+   Polling GET_UPLOAD_STATUS kalau gagal (Failed to fetch) jangan
+   langsung throw — tetap polling karena upload mungkin masih jalan
+   di server (form POST sudah terkirim).
+   ============================================================ */
 async function upload(file,id){
   if(file.size>25*1024*1024)throw Error('Foto maksimal 25 MB.');
   let toSend=file;
   if(file.type.startsWith('image/')){
-    try{toSend=await compressImage(file,1600,0.72);}catch(_){toSend=file;}
+    try{toSend=await compressImage(file,1280,0.65);}catch(_){toSend=file;}
   }
-  for(let retry=0;retry<2;retry++){
+  for(let retry=0;retry<3;retry++){
     try{
       const up='UP-'+Date.now()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();
       await postForm({action:'UPLOAD_PHOTO_BASE64',upload_id:up,finding_id:id,mime:toSend.type||'image/jpeg',filename:toSend.name,data_base64:await fileData(toSend)},120000);
-      // Polling diperpanjang jadi 2 menit (120 x 1 detik) untuk koneksi lambat.
-      for(let i=0;i<120;i++){
-        await new Promise(r=>setTimeout(r,1000));
-        const j=await jsonGet('GET_UPLOAD_STATUS',{upload_id:up});
-        if(j.status==='success'&&j.url)return j.url;
-        if(j.status==='error')throw Error(j.message||'Upload foto gagal');
+      // Polling 3 menit (360 x 500ms) — cek lebih cepat, tahan error polling
+      for(let i=0;i<360;i++){
+        await new Promise(r=>setTimeout(r,500));
+        try{
+          const j=await jsonGet('GET_UPLOAD_STATUS',{upload_id:up});
+          if(j.status==='success'&&j.url)return j.url;
+          if(j.status==='error')throw Error(j.message||'Upload foto gagal');
+        }catch(pollErr){
+          // Kalau polling sendiri gagal (network drop), abaikan dan lanjut polling.
+          // Upload mungkin masih diproses server.
+          if(/INVALID|NOT_FOUND|REQUIRED/i.test(String(pollErr.message))) throw pollErr;
+          console.warn('[UPLOAD POLL] retry karena:',pollErr.message);
+        }
       }
       throw Error('Upload foto timeout — coba lagi di area dengan sinyal lebih baik.');
     }catch(e){
-      if(retry===1)throw e; // sudah dicoba ulang 1x, menyerah
+      if(retry===2)throw e;
+      console.warn('[UPLOAD RETRY '+(retry+1)+'/3]',e.message);
+      await new Promise(r=>setTimeout(r,3000));
     }
   }
 }
+
 function viewer(src,meta){$('viewerImg').src=src;$('viewerMeta').textContent=meta;$('viewer').classList.add('open')}
 function closeV(){$('viewer').classList.remove('open');$('viewerImg').src=''}
 $('closeViewer').onclick=closeV;$('viewer').onclick=e=>{if(e.target.id==='viewer')closeV()};document.addEventListener('keydown',e=>{if(e.key==='Escape')closeV()});
@@ -177,15 +193,21 @@ async function saveFinding(id){
 async function postJson(data){
   if(!API)throw Error('URL GAS belum diisi di source finding-notes.html.');
   let lastErr;
-  for(let attempt=0;attempt<2;attempt++){
+  for(let attempt=0;attempt<3;attempt++){
     try{
-      const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(data).toString()});
+      const r=await fetch(API,{
+        method:'POST',
+        mode:'cors',
+        credentials:'omit',
+        headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+        body:new URLSearchParams(data).toString()
+      });
       const j=await r.json();
       if(!j||(j.status!=='success'&&j.ok!==true))throw Error((j&&(j.message||j.error))||'Gagal menyimpan ke Central.');
       return j;
     }catch(e){
       lastErr=e;
-      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+      if(attempt<2)await new Promise(r=>setTimeout(r,1000*(attempt+1)));
     }
   }
   throw Error(/json/i.test(String(lastErr&&lastErr.message))?'Central sedang sibuk (limit Google sesaat), coba SIMPAN lagi.':(lastErr&&lastErr.message)||'Gagal menyimpan ke Central.');
@@ -217,9 +239,7 @@ function openNew(area=''){
 }
 
 /* ============================================================
-   [FIX #2] readSttCache — tambah TTL 1 jam + normalisasi photo_url
-   Masalah lama: cache dari 3 hari lalu tetap dipakai, bikin device
-   B tampilkan data lama yang beda dengan device A.
+   [FIX #3] readSttCache — TTL 1 jam + normalisasi photo_url
    ============================================================ */
 const CACHE_TTL_MS = 1000 * 60 * 60; // 1 jam
 
@@ -233,7 +253,6 @@ function readSttCache(){
     return {
       findings: list.map(v => ({
         ...v,
-        // Normalisasi photo_url: handle string, object {url:...}, atau array campuran
         photo_url: (Array.isArray(v?.photo_url) ? v.photo_url : [])
           .map(p => typeof p === 'string' ? p : String(p?.url || ''))
           .filter(p => /^https?:\/\//i.test(p))
@@ -248,10 +267,9 @@ function readSttCache(){
 }
 
 /* ============================================================
-   [FIX #3] sync — fallback cache HANYA jika fresh + log Console
-   Masalah lama: kalau GET_FINDINGS gagal, device langsung pakai
-   cache lama (yang bisa beda dengan device lain). Sekarang cache
-   basi > 1 jam TIDAK dipakai.
+   [FIX #4] sync — data server selalu menang; fallback cache HANYA
+   kalau fresh (< 1 jam). Cache basi tidak dipakai supaya semua
+   device tidak menampilkan data lama yang beda-beda.
    ============================================================ */
 async function sync(){
   if(!API){setState('⚠️ CENTRAL BELUM TERHUBUNG — CEK GAS_API_ENDPOINTS DI SOURCE HTML.',false);return}
@@ -259,11 +277,8 @@ async function sync(){
     setState('⏳ SINKRONISASI CENTRAL...',false);
     const j=await jsonGet('GET_FINDINGS');
     const serverRev=String(j.revision||'0');
-    // Backend berhasil dihubungi -> data server SELALU menang, apapun isinya
-    // (termasuk kalau memang 0), supaya semua device selalu sinkron sama persis.
     const remote=Array.isArray(j.data)?j.data.map(x=>({
       ...x,
-      // Normalisasi: pastikan photo_url = array of URL string
       photo_url:(Array.isArray(x.photo_url)?x.photo_url:[])
         .map(p=>typeof p==='string'?p:String(p?.url||''))
         .filter(p=>/^https?:\/\//i.test(p))
@@ -282,7 +297,6 @@ async function sync(){
   }catch(e){
     console.error('[SYNC] error:',e);
     const cache=readSttCache();
-    // HANYA pakai cache kalau masih fresh (dalam 1 jam terakhir)
     if(cache.findings.length && cache.isFresh){
       findings=cache.findings;
       render();
@@ -290,7 +304,6 @@ async function sync(){
       setState('⚠️ CENTRAL OFFLINE • CACHE '+ageMin+' MENIT LALU ('+findings.length+' FINDING)',false);
       return;
     }
-    // Cache basi atau kosong -> kosongkan, jangan tampilkan data lama
     findings=[];
     render();
     setState('⚠️ CENTRAL OFFLINE • '+e.message+' • CACHE SUDAH BASI',false);
@@ -299,8 +312,9 @@ async function sync(){
 $('syncBtn').onclick=sync;$('addBtn').onclick=()=>openNew('');sync();
 
 /* ============================================================
-   [FIX #4] AUTO-SYNC POLLING — semua device selalu sinkron
+   [FIX #5] AUTO-SYNC POLLING — semua device selalu sinkron
    Device lain otomatis update dalam max 25 detik tanpa klik SYNC.
+   Skip kalau user sedang mengetik / edit / modal terbuka.
    ============================================================ */
 (function(){
   const SYNC_INTERVAL = 25000;   // 25 detik
@@ -308,13 +322,10 @@ $('syncBtn').onclick=sync;$('addBtn').onclick=()=>openNew('');sync();
 
   async function autoSync(){
     try{
-      // Skip kalau user sedang mengetik / edit / modal terbuka
       if(document.querySelector('.new') || document.querySelector('.finding.editing')) return;
       if(document.querySelector('.viewer.open')) return;
       await sync();
-    }catch(e){
-      /* diamkan — sync() sudah handle error */
-    }
+    }catch(e){ /* diamkan */ }
   }
 
   function schedule(){
@@ -325,25 +336,11 @@ $('syncBtn').onclick=sync;$('addBtn').onclick=()=>openNew('');sync();
     }, SYNC_INTERVAL);
   }
 
-  // 1. Tab visible lagi (user balik dari app lain)
   document.addEventListener('visibilitychange', () => {
-    if(document.visibilityState === 'visible'){
-      console.log('[AUTO-SYNC] tab visible → sync');
-      autoSync();
-    }
+    if(document.visibilityState === 'visible') autoSync();
   });
-
-  // 2. Koneksi balik online
-  window.addEventListener('online', () => {
-    console.log('[AUTO-SYNC] online → sync');
-    autoSync();
-  });
-
-  // 3. Fokus kembali ke window
-  window.addEventListener('focus', () => {
-    console.log('[AUTO-SYNC] window focus → sync');
-    autoSync();
-  });
+  window.addEventListener('online', () => autoSync());
+  window.addEventListener('focus', () => autoSync());
 
   schedule();
   console.log('[AUTO-SYNC] aktif setiap ' + (SYNC_INTERVAL/1000) + ' detik');
