@@ -1177,18 +1177,7 @@ header .subtitle{font-size:1rem}
 }
 
 
-/* ================= SOUND ACTIVATION GATE ================= */
-#sttSoundGate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:22px;background:linear-gradient(145deg,#06152f,#0b3d91 55%,#071b38);color:#fff;font-family:Poppins,Arial,sans-serif}
-#sttSoundGate .sound-gate-card{width:min(460px,100%);padding:30px 24px;border:1px solid rgba(255,255,255,.16);border-radius:24px;background:rgba(255,255,255,.10);box-shadow:0 24px 70px rgba(0,0,0,.38);backdrop-filter:blur(18px);text-align:center}
-#sttSoundGate .sound-gate-icon{width:76px;height:76px;margin:0 auto 18px;border-radius:22px;display:grid;place-items:center;background:rgba(255,255,255,.14);font-size:32px}
-#sttSoundGate h2{margin:0 0 10px;font-size:22px;font-weight:800;letter-spacing:.2px}
-#sttSoundGate p{margin:0 auto 22px;max-width:360px;color:rgba(255,255,255,.78);font-size:14px;line-height:1.55}
-#sttSoundGate .sound-gate-status{min-height:22px;margin:0 0 16px;font-size:13px;font-weight:700;color:#cbd5e1}
-#sttSoundGate button{width:100%;min-height:50px;border:0;border-radius:14px;font:800 14px Poppins,Arial,sans-serif;cursor:pointer;transition:.2s transform,.2s opacity,.2s filter}
-#sttSoundGate button:active{transform:scale(.98)}
-#sttSoundEnable{background:#fff;color:#0b3d91}
-#sttSoundContinue{margin-top:10px;background:#10b981;color:#fff;opacity:.45;cursor:not-allowed}
-#sttSoundContinue.ready{opacity:1;cursor:pointer;box-shadow:0 10px 30px rgba(16,185,129,.25)}
+/* ================= SOUND ACTIVATION GATE (legacy, dihapus — dobel dengan video gate di bawah) ================= */
 body.stt-sound-locked{overflow:hidden}
 
 </style>
@@ -1285,67 +1274,8 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 </head>
 <body>
 
-<!-- ================= SOUND ACTIVATION GATE ================= -->
-<div id="sttSoundGate" role="dialog" aria-modal="true" aria-labelledby="sttSoundGateTitle">
-  <div class="sound-gate-card">
-    <div class="sound-gate-icon" aria-hidden="true">🔊</div>
-    <h2 id="sttSoundGateTitle">AKTIFKAN SUARA APLIKASI</h2>
-    <p>SEBELUM MASUK KE APLIKASI, AKTIFKAN SUARA TERLEBIH DAHULU AGAR AUDIO DAN VIDEO DAPAT BERJALAN DENGAN BENAR.</p>
-    <div class="sound-gate-status" id="sttSoundGateStatus">SUARA BELUM DIAKTIFKAN</div>
-    <button id="sttSoundEnable" type="button">🔊 AKTIFKAN SUARA</button>
-    <button id="sttSoundContinue" type="button" disabled>LANJUTKAN →</button>
-  </div>
-</div>
-<script>
-(function(){
-  'use strict';
-  document.body.classList.add('stt-sound-locked');
-  var gate=document.getElementById('sttSoundGate');
-  var enable=document.getElementById('sttSoundEnable');
-  var cont=document.getElementById('sttSoundContinue');
-  var status=document.getElementById('sttSoundGateStatus');
-  var audioCtx=null;
-  var activated=false;
-
-  function setReady(){
-    activated=true;
-    status.textContent='SUARA AKTIF ✓';
-    status.style.color='#6ee7b7';
-    enable.textContent='✓ SUARA SUDAH AKTIF';
-    enable.disabled=true;
-    enable.style.opacity='.75';
-    cont.disabled=false;
-    cont.classList.add('ready');
-  }
-
-  enable.addEventListener('click',async function(){
-    try{
-      var AC=window.AudioContext||window.webkitAudioContext;
-      if(AC){
-        audioCtx=audioCtx||new AC();
-        if(audioCtx.state==='suspended') await audioCtx.resume();
-        // Create a near-silent audio pulse during the user gesture to unlock audio.
-        var osc=audioCtx.createOscillator();
-        var gain=audioCtx.createGain();
-        gain.gain.value=0.0001;
-        osc.connect(gain); gain.connect(audioCtx.destination);
-        osc.start(); osc.stop(audioCtx.currentTime+0.03);
-      }
-      setReady();
-    }catch(err){
-      // Some browsers do not expose AudioContext; the click itself still establishes user activation.
-      setReady();
-    }
-  });
-
-  cont.addEventListener('click',function(){
-    if(!activated) return;
-    document.body.classList.remove('stt-sound-locked');
-    gate.remove();
-    try{window.dispatchEvent(new CustomEvent('stt:sound-ready'));}catch(e){}
-  });
-})();
-</script>
+<!-- Gate suara polos (duplikat) sudah dihapus. Gate suara resmi ada di
+     bagian bawah body: #sttAppVideoGate (yang ada videonya). -->
 
 
 <!-- ==================== PROFESSIONAL NAVIGATION SHELL ==================== -->
@@ -4799,8 +4729,11 @@ renderAreas();
 </script>
 <!-- STT DEVICE ACCESS CONTROL v3: central status + wajib kode aktivasi.
      Device baru (PENDING) dan device yang diblokir (BLOCKED) sama-sama
-     mengunci total aplikasi. Hanya status ALLOWED yang membuka akses —
-     didapat lewat kode aktivasi (self-service) atau tombol admin manual. -->
+     mengunci total aplikasi DAN menyembunyikan gate suara/video di bawah
+     (#sttAppVideoGate) supaya urutannya selalu: aktivasi device dulu,
+     baru gate suara, baru masuk aplikasi. Hanya status ALLOWED yang
+     membuka akses — didapat lewat kode aktivasi (self-service) atau
+     tombol admin manual. -->
 <script id="STT_DEVICE_ACCESS_CONTROL_V2_CENTRAL">
 (function(){
   'use strict';
@@ -4820,7 +4753,7 @@ renderAreas();
     const st=document.createElement('style');st.id='sttDeviceAccessCssV2';
     st.textContent=`
       body.stt-device-locked>*:not(#sttDeviceBlockedGate){pointer-events:none!important;user-select:none!important}
-      #sttDeviceBlockedGate{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.96);display:flex;align-items:center;justify-content:center;padding:22px;box-sizing:border-box}
+      #sttDeviceBlockedGate{position:fixed;inset:0;z-index:2147483647;background:rgba(3,12,30,.96);display:flex;align-items:center;justify-content:center;padding:22px;box-sizing:border-box}
       #sttDeviceBlockedGate .dac-card{width:min(440px,100%);background:#fff;border-radius:22px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.4);font-family:inherit;text-align:center}
       #sttDeviceBlockedGate h2{margin:0 0 10px;color:#b42318;font-size:23px}
       #sttDeviceBlockedGate p{color:#475569;line-height:1.55;margin:8px 0}
@@ -4857,6 +4790,9 @@ renderAreas();
 
   function lockGate(kind){
     css(); document.body.classList.add('stt-device-locked');
+    // Sembunyikan gate video sementara device belum ALLOWED, supaya urutan
+    // yang dilihat user selalu: aktivasi device dulu, baru gate suara/video.
+    const vg=document.getElementById('sttAppVideoGate');if(vg)vg.style.display='none';
     let el=document.getElementById('sttDeviceBlockedGate');
     if(!el||el.dataset.kind!==kind){
       if(el)el.remove();
@@ -4876,6 +4812,9 @@ renderAreas();
   function unlock(){
     document.body.classList.remove('stt-device-locked');
     const el=document.getElementById('sttDeviceBlockedGate');if(el)el.remove();
+    // Device sudah ALLOWED: tampilkan lagi gate suara/video (kalau belum
+    // pernah diselesaikan user — kalau sudah, elemennya sudah dihapus sendiri).
+    const vg=document.getElementById('sttAppVideoGate');if(vg)vg.style.display='';
   }
 
   function apply(v){
@@ -5282,13 +5221,14 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 (function(){
  const gate=document.getElementById('sttAppVideoGate'),video=document.getElementById('sttAppIntroVideo'),sound=document.getElementById('sttSoundBtn'),cont=document.getElementById('sttContinueBtn'),status=document.getElementById('sttGateStatus');
  if(!gate||!video||!sound||!cont)return;
+ document.body.classList.add('stt-sound-locked');
  let soundOK=false;
  sound.addEventListener('click',async()=>{
    if(soundOK)return;
    try{video.muted=false;video.volume=1;await video.play();soundOK=true;sound.textContent='🔊 SUARA AKTIF ✓';sound.disabled=true;status.textContent='SUARA AKTIF ✓ — SEKARANG KLIK LANJUTKAN';cont.disabled=false;cont.classList.add('ready');}
    catch(e){status.textContent='IZINKAN AUDIO BROWSER, LALU TEKAN TOMBOL INI SEKALI LAGI';}
  });
- cont.addEventListener('click',()=>{if(!soundOK)return;gate.remove();try{video.pause();}catch(_){};document.documentElement.classList.add('stt-app-ready');});
+ cont.addEventListener('click',()=>{if(!soundOK)return;document.body.classList.remove('stt-sound-locked');gate.remove();try{video.pause();}catch(_){};document.documentElement.classList.add('stt-app-ready');try{window.dispatchEvent(new CustomEvent('stt:sound-ready'));}catch(_){}});
 })();
 </script>
 
