@@ -33,10 +33,20 @@ function timeFmt(v){if(!v)return '-';const d=new Date(v);return isNaN(d)?String(
 async function jsonGet(action,params={}){
   if(!API) throw Error('URL GAS belum diisi di source finding-notes.html.');
   const q=new URLSearchParams({action,...params,t:String(Date.now())});
-  const r=await fetch(API+'?'+q.toString(),{cache:'no-store'});
-  const j=await r.json();
-  if(j.status!=='success'&&j.status!=='pending') throw Error(j.message||'Central error');
-  return j;
+  let lastErr;
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const r=await fetch(API+'?'+q.toString(),{cache:'no-store'});
+      const j=await r.json();
+      if(j.status!=='success'&&j.status!=='pending') throw Error(j.message||'Central error');
+      return j;
+    }catch(e){
+      lastErr=e;
+      // Respons bukan JSON (kena limit/quota Google sesaat) -> coba sekali lagi.
+      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+    }
+  }
+  throw Error(/json/i.test(String(lastErr&&lastErr.message))?'Central sedang sibuk (limit Google sesaat), coba lagi.':(lastErr&&lastErr.message)||'Central error');
 }
 function postForm(data,timeoutMs){return new Promise((res,rej)=>{
   if(!API)return rej(Error('URL GAS belum diisi di source finding-notes.html.'));
@@ -78,16 +88,22 @@ async function upload(file,id){
   if(file.type.startsWith('image/')){
     try{toSend=await compressImage(file,1600,0.72);}catch(_){toSend=file;}
   }
-  const up='UP-'+Date.now()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();
-  await postForm({action:'UPLOAD_PHOTO_BASE64',upload_id:up,finding_id:id,mime:toSend.type||'image/jpeg',filename:toSend.name,data_base64:await fileData(toSend)},120000);
-  // Polling diperpanjang jadi 2 menit (120 x 1 detik) untuk koneksi lambat.
-  for(let i=0;i<120;i++){
-    await new Promise(r=>setTimeout(r,1000));
-    const j=await jsonGet('GET_UPLOAD_STATUS',{upload_id:up});
-    if(j.status==='success'&&j.url)return j.url;
-    if(j.status==='error')throw Error(j.message||'Upload foto gagal');
+  for(let retry=0;retry<2;retry++){
+    try{
+      const up='UP-'+Date.now()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();
+      await postForm({action:'UPLOAD_PHOTO_BASE64',upload_id:up,finding_id:id,mime:toSend.type||'image/jpeg',filename:toSend.name,data_base64:await fileData(toSend)},120000);
+      // Polling diperpanjang jadi 2 menit (120 x 1 detik) untuk koneksi lambat.
+      for(let i=0;i<120;i++){
+        await new Promise(r=>setTimeout(r,1000));
+        const j=await jsonGet('GET_UPLOAD_STATUS',{upload_id:up});
+        if(j.status==='success'&&j.url)return j.url;
+        if(j.status==='error')throw Error(j.message||'Upload foto gagal');
+      }
+      throw Error('Upload foto timeout — coba lagi di area dengan sinyal lebih baik.');
+    }catch(e){
+      if(retry===1)throw e; // sudah dicoba ulang 1x, menyerah
+    }
   }
-  throw Error('Upload foto timeout — coba lagi di area dengan sinyal lebih baik.');
 }
 function viewer(src,meta){$('viewerImg').src=src;$('viewerMeta').textContent=meta;$('viewer').classList.add('open')}
 function closeV(){$('viewer').classList.remove('open');$('viewerImg').src=''}
@@ -142,10 +158,19 @@ async function saveFinding(id){
 }
 async function postJson(data){
   if(!API)throw Error('URL GAS belum diisi di source finding-notes.html.');
-  const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(data).toString()});
-  const j=await r.json();
-  if(!j||(j.status!=='success'&&j.ok!==true))throw Error((j&&(j.message||j.error))||'Gagal menyimpan ke Central.');
-  return j;
+  let lastErr;
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(data).toString()});
+      const j=await r.json();
+      if(!j||(j.status!=='success'&&j.ok!==true))throw Error((j&&(j.message||j.error))||'Gagal menyimpan ke Central.');
+      return j;
+    }catch(e){
+      lastErr=e;
+      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+    }
+  }
+  throw Error(/json/i.test(String(lastErr&&lastErr.message))?'Central sedang sibuk (limit Google sesaat), coba SIMPAN lagi.':(lastErr&&lastErr.message)||'Gagal menyimpan ke Central.');
 }
 async function saveObject(f){await postJson({action:'SAVE_FINDING',finding_id:f.finding_id,area_code:f.area_code,photo_url:JSON.stringify(f.photo_url||[]),description:f.description||'',finder_name:f.finder_name||'Petugas',created_at:f.created_at,status:f.status||'OPEN'})}
 async function delFinding(id){if(!confirm('HAPUS FINDING INI DARI CENTRAL? FOTO DI GOOGLE DRIVE TIDAK DIHAPUS OTOMATIS.'))return;try{setState('⏳ MENGHAPUS...',false);await postJson({action:'DELETE_FINDING',finding_id:id});await sync()}catch(e){alert('❌ '+e.message)}}
