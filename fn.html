@@ -137,9 +137,41 @@ function openNew(area=''){
   $('nSave').onclick=async()=>{const ar=$('nArea').value.trim(),desc=$('nDesc').value.trim();if(!ar||!desc)return alert('AREA dan FINDING NOTES wajib diisi.');const id='FIND-'+Date.now()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();const f={finding_id:id,area_code:ar,finder_name:$('nFinder').value.trim()||'Petugas',description:desc,photo_url:[],created_at:new Date(`${$('nDate').value}T${$('nTime').value||'00:00:00'}`).toISOString(),status:'OPEN'};try{for(const file of files)f.photo_url.push(await upload(file,id));await saveObject(f);box.innerHTML='';await sync();alert('✅ FINDING TERSIMPAN DI CENTRAL.')}catch(e){alert('❌ '+e.message)}};
   box.scrollIntoView({behavior:'smooth',block:'center'});
 }
+function readSttCache(){
+  try{
+    const raw=localStorage.getItem('STT_FINDING_CENTRAL_CACHE_V16');
+    const x=JSON.parse(raw||'{}');
+    const list=Array.isArray(x.findings)?x.findings:[];
+    return {findings:list.map(v=>({...v,photo_url:Array.isArray(v?.photo_url)?v.photo_url:[]})),revision:String(x.revision||'')};
+  }catch(_){return {findings:[],revision:''};}
+}
 async function sync(){
   if(!API){setState('⚠️ CENTRAL BELUM TERHUBUNG — CEK GAS_API_ENDPOINTS DI SOURCE HTML.',false);return}
-  try{setState('⏳ SINKRONISASI CENTRAL...',false);const j=await jsonGet('GET_FINDINGS');findings=(j.data||[]).map(x=>({...x,photo_url:Array.isArray(x.photo_url)?x.photo_url:[]}));render();setState('● CENTRAL ONLINE • '+findings.length+' FINDING',true)}catch(e){setState('⚠️ CENTRAL OFFLINE • '+e.message,false)}
+  try{
+    setState('⏳ SINKRONISASI CENTRAL...',false);
+    const j=await jsonGet('GET_FINDINGS');
+    const remote=Array.isArray(j.data)?j.data.map(x=>({...x,photo_url:Array.isArray(x.photo_url)?x.photo_url:[]})):[];
+    const cache=readSttCache();
+    // Jika backend mengembalikan kosong, tetapi STT pada perangkat yang sama
+    // sudah memiliki cache Central yang valid, tampilkan cache agar finding
+    // tidak terlihat hilang hanya karena halaman fn.html memakai versi/deployment
+    // backend yang belum ter-refresh. Jika revision berbeda, backend tetap menang.
+    if(remote.length){
+      findings=remote;
+      try{localStorage.setItem('STT_FINDING_CENTRAL_CACHE_V16',JSON.stringify({findings:remote,revision:String(j.revision||cache.revision||''),updatedAt:Date.now()}));}catch(_){ }
+      render();setState('● CENTRAL ONLINE • '+findings.length+' FINDING',true);return;
+    }
+    if(cache.findings.length && (!j.revision || !cache.revision || String(j.revision)===cache.revision)){
+      findings=cache.findings;render();setState('● CENTRAL ONLINE • '+findings.length+' FINDING • CACHE TERVERIFIKASI',true);return;
+    }
+    findings=[];render();setState('● CENTRAL ONLINE • 0 FINDING',true);
+  }catch(e){
+    const cache=readSttCache();
+    if(cache.findings.length){
+      findings=cache.findings;render();setState('⚠️ CENTRAL BELUM TERBACA • MENAMPILKAN CACHE TERAKHIR ('+findings.length+' FINDING)',false);return;
+    }
+    setState('⚠️ CENTRAL OFFLINE • '+e.message,false);
+  }
 }
 $('syncBtn').onclick=sync;$('addBtn').onclick=()=>openNew('');sync();
 </script>
