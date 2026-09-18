@@ -1176,6 +1176,21 @@ header .subtitle{font-size:1rem}
   .container > .card:first-of-type .row{display:grid;grid-template-columns:repeat(4,1fr)}
 }
 
+
+/* ================= SOUND ACTIVATION GATE ================= */
+#sttSoundGate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:22px;background:linear-gradient(145deg,#06152f,#0b3d91 55%,#071b38);color:#fff;font-family:Poppins,Arial,sans-serif}
+#sttSoundGate .sound-gate-card{width:min(460px,100%);padding:30px 24px;border:1px solid rgba(255,255,255,.16);border-radius:24px;background:rgba(255,255,255,.10);box-shadow:0 24px 70px rgba(0,0,0,.38);backdrop-filter:blur(18px);text-align:center}
+#sttSoundGate .sound-gate-icon{width:76px;height:76px;margin:0 auto 18px;border-radius:22px;display:grid;place-items:center;background:rgba(255,255,255,.14);font-size:32px}
+#sttSoundGate h2{margin:0 0 10px;font-size:22px;font-weight:800;letter-spacing:.2px}
+#sttSoundGate p{margin:0 auto 22px;max-width:360px;color:rgba(255,255,255,.78);font-size:14px;line-height:1.55}
+#sttSoundGate .sound-gate-status{min-height:22px;margin:0 0 16px;font-size:13px;font-weight:700;color:#cbd5e1}
+#sttSoundGate button{width:100%;min-height:50px;border:0;border-radius:14px;font:800 14px Poppins,Arial,sans-serif;cursor:pointer;transition:.2s transform,.2s opacity,.2s filter}
+#sttSoundGate button:active{transform:scale(.98)}
+#sttSoundEnable{background:#fff;color:#0b3d91}
+#sttSoundContinue{margin-top:10px;background:#10b981;color:#fff;opacity:.45;cursor:not-allowed}
+#sttSoundContinue.ready{opacity:1;cursor:pointer;box-shadow:0 10px 30px rgba(16,185,129,.25)}
+body.stt-sound-locked{overflow:hidden}
+
 </style>
 
 <style id="ALLSTT premium letterhead editor">
@@ -1269,6 +1284,69 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 </style>
 </head>
 <body>
+
+<!-- ================= SOUND ACTIVATION GATE ================= -->
+<div id="sttSoundGate" role="dialog" aria-modal="true" aria-labelledby="sttSoundGateTitle">
+  <div class="sound-gate-card">
+    <div class="sound-gate-icon" aria-hidden="true">🔊</div>
+    <h2 id="sttSoundGateTitle">AKTIFKAN SUARA APLIKASI</h2>
+    <p>SEBELUM MASUK KE APLIKASI, AKTIFKAN SUARA TERLEBIH DAHULU AGAR AUDIO DAN VIDEO DAPAT BERJALAN DENGAN BENAR.</p>
+    <div class="sound-gate-status" id="sttSoundGateStatus">SUARA BELUM DIAKTIFKAN</div>
+    <button id="sttSoundEnable" type="button">🔊 AKTIFKAN SUARA</button>
+    <button id="sttSoundContinue" type="button" disabled>LANJUTKAN →</button>
+  </div>
+</div>
+<script>
+(function(){
+  'use strict';
+  document.body.classList.add('stt-sound-locked');
+  var gate=document.getElementById('sttSoundGate');
+  var enable=document.getElementById('sttSoundEnable');
+  var cont=document.getElementById('sttSoundContinue');
+  var status=document.getElementById('sttSoundGateStatus');
+  var audioCtx=null;
+  var activated=false;
+
+  function setReady(){
+    activated=true;
+    status.textContent='SUARA AKTIF ✓';
+    status.style.color='#6ee7b7';
+    enable.textContent='✓ SUARA SUDAH AKTIF';
+    enable.disabled=true;
+    enable.style.opacity='.75';
+    cont.disabled=false;
+    cont.classList.add('ready');
+  }
+
+  enable.addEventListener('click',async function(){
+    try{
+      var AC=window.AudioContext||window.webkitAudioContext;
+      if(AC){
+        audioCtx=audioCtx||new AC();
+        if(audioCtx.state==='suspended') await audioCtx.resume();
+        // Create a near-silent audio pulse during the user gesture to unlock audio.
+        var osc=audioCtx.createOscillator();
+        var gain=audioCtx.createGain();
+        gain.gain.value=0.0001;
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime+0.03);
+      }
+      setReady();
+    }catch(err){
+      // Some browsers do not expose AudioContext; the click itself still establishes user activation.
+      setReady();
+    }
+  });
+
+  cont.addEventListener('click',function(){
+    if(!activated) return;
+    document.body.classList.remove('stt-sound-locked');
+    gate.remove();
+    try{window.dispatchEvent(new CustomEvent('stt:sound-ready'));}catch(e){}
+  });
+})();
+</script>
+
 
 <!-- ==================== PROFESSIONAL NAVIGATION SHELL ==================== -->
 <button class="hamburger" id="hamburgerBtn" aria-label="Buka menu navigasi" aria-expanded="false">
@@ -4921,7 +4999,7 @@ renderAreas();
 const API=String(STT_FINDING_CENTRAL_URL||'').trim().replace(/\/$/,'');
 const CACHE='STT_FINDING_CENTRAL_CACHE_V16';
 const PENDING_DB='patrol_db_v1', PENDING_STORE='findingPending';
-const REQUEST_TIMEOUT=12000, UPLOAD_TIMEOUT=20000, RETRIES=2;
+const REQUEST_TIMEOUT=20000, UPLOAD_TIMEOUT=120000, RETRIES=2;
 let centralFindings=[], syncInFlight=null, pendingDb=null, setupDone=false, onlineHandler=null;
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -4981,15 +5059,16 @@ async function uploadPhoto(blob,meta,index,total){
     iframe.onload=()=>setTimeout(()=>finish(null),400);iframe.onerror=()=>finish(new Error('Upload foto gagal.'));
     document.body.appendChild(iframe);document.body.appendChild(form);try{form.submit();}catch(e){finish(e);}
   }),'Mengirim foto '+(index+1)+'/'+total);
-  for(let i=0;i<24;i++){
+  // Polling diperpanjang jadi 2 menit (240 x 500ms) untuk koneksi lapangan yang lambat.
+  for(let i=0;i<240;i++){
     await sleep(500);
     const r=await fetchTimeout(API+'?action=GET_UPLOAD_STATUS&upload_id='+encodeURIComponent(uploadId)+'&t='+Date.now(),{cache:'no-store'},REQUEST_TIMEOUT);
     if(r.ok){const j=await r.json();if(j.status==='success'&&j.url)return j.url;if(j.status==='error')throw new Error(j.message||'Upload foto gagal');}
-    progress('☁️ Upload foto resolusi tinggi '+(index+1)+'/'+total+'...',Math.round(((index+(i+1)/24)/Math.max(1,total))*70)+5);
+    progress('☁️ Upload foto resolusi tinggi '+(index+1)+'/'+total+'...',Math.round(((index+(i+1)/240)/Math.max(1,total))*70)+5);
   }
   throw new Error('Server belum menyelesaikan upload foto.');
 }
-function blobFromFile(file){return new Promise((resolve,reject)=>{if(!file||!file.type.startsWith('image/'))return reject(new Error('File bukan gambar.'));const src=URL.createObjectURL(file);const img=new Image();img.onload=()=>{try{const MAX=4096,scale=Math.min(1,MAX/Math.max(img.naturalWidth||img.width,img.naturalHeight||img.height)),w=Math.max(1,Math.round((img.naturalWidth||img.width)*scale)),h=Math.max(1,Math.round((img.naturalHeight||img.height)*scale)),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d',{alpha:false,desynchronized:true}).drawImage(img,0,0,w,h);c.toBlob(b=>{URL.revokeObjectURL(src);b?resolve(b):reject(new Error('Gagal memproses foto resolusi tinggi.'));},'image/jpeg',.92);}catch(e){URL.revokeObjectURL(src);reject(e);}};img.onerror=()=>{URL.revokeObjectURL(src);reject(new Error('Foto tidak dapat dibaca.'));};img.src=src;});}
+function blobFromFile(file){return new Promise((resolve,reject)=>{if(!file||!file.type.startsWith('image/'))return reject(new Error('File bukan gambar.'));const src=URL.createObjectURL(file);const img=new Image();img.onload=()=>{try{const MAX=1600,scale=Math.min(1,MAX/Math.max(img.naturalWidth||img.width,img.naturalHeight||img.height)),w=Math.max(1,Math.round((img.naturalWidth||img.width)*scale)),h=Math.max(1,Math.round((img.naturalHeight||img.height)*scale)),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d',{alpha:false,desynchronized:true}).drawImage(img,0,0,w,h);c.toBlob(b=>{URL.revokeObjectURL(src);b?resolve(b):reject(new Error('Gagal memproses foto.'));},'image/jpeg',.72);}catch(e){URL.revokeObjectURL(src);reject(e);}};img.onerror=()=>{URL.revokeObjectURL(src);reject(new Error('Foto tidak dapat dibaca.'));};img.src=src;});}
 function openPendingDb(){if(pendingDb)return Promise.resolve(pendingDb);return new Promise(resolve=>{const r=indexedDB.open(PENDING_DB,3);r.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains(PENDING_STORE))d.createObjectStore(PENDING_STORE);};r.onsuccess=()=>{pendingDb=r.result;resolve(pendingDb)};r.onerror=()=>resolve(null);});}
 function pPut(key,val){return openPendingDb().then(db=>new Promise(res=>{if(!db)return res(false);const tx=db.transaction(PENDING_STORE,'readwrite');tx.objectStore(PENDING_STORE).put(val,key);tx.oncomplete=()=>res(true);tx.onerror=()=>res(false);}));}
 function pGetAll(){return openPendingDb().then(db=>new Promise(res=>{if(!db)return res([]);const tx=db.transaction(PENDING_STORE,'readonly'),r=tx.objectStore(PENDING_STORE).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>res([]);}));}

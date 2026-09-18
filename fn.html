@@ -38,28 +38,56 @@ async function jsonGet(action,params={}){
   if(j.status!=='success'&&j.status!=='pending') throw Error(j.message||'Central error');
   return j;
 }
-function postForm(data){return new Promise((res,rej)=>{
+function postForm(data,timeoutMs){return new Promise((res,rej)=>{
   if(!API)return rej(Error('URL GAS belum diisi di source finding-notes.html.'));
   const id='if_'+Date.now()+'_'+Math.random().toString(36).slice(2);
   const iframe=document.createElement('iframe');iframe.name=id;iframe.style.display='none';
   const f=document.createElement('form');f.method='POST';f.action=API;f.target=id;f.style.display='none';
   for(const [k,v] of Object.entries(data)){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=String(v??'');f.appendChild(i)}
   let done=false;const finish=e=>{if(done)return;done=true;clearTimeout(t);iframe.remove();f.remove();e?rej(e):res(true)};
-  const t=setTimeout(()=>finish(Error('POST timeout')),20000);iframe.onload=()=>setTimeout(()=>finish(),500);iframe.onerror=()=>finish(Error('POST gagal'));
+  // Timeout dibuat lebih panjang (default 90 detik, foto bisa 3 menit) karena
+  // koneksi lapangan sering sangat lambat (kadang cuma belasan KB/s), jadi
+  // kirim data base64 foto ke Apps Script butuh waktu jauh lebih lama dari 20 detik.
+  const t=setTimeout(()=>finish(Error('POST timeout — koneksi terlalu lambat')),timeoutMs||90000);
+  iframe.onload=()=>setTimeout(()=>finish(),500);iframe.onerror=()=>finish(Error('POST gagal'));
   document.body.append(iframe,f);try{f.submit()}catch(e){finish(e)}
 })}
 function fileData(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',').pop());r.onerror=()=>rej(Error('Foto gagal dibaca'));r.readAsDataURL(file)})}
+// Kompres & resize foto di browser SEBELUM diubah ke base64. Foto kamera HP
+// biasanya 3-8MB; setelah ini biasanya jadi 150-400KB saja, sehingga jauh
+// lebih cepat dan tahan dikirim lewat koneksi lapangan yang lambat.
+function compressImage(file,maxDim,quality){
+  return new Promise((resolve)=>{
+    const img=new Image();const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      try{
+        let w=img.naturalWidth,h=img.naturalHeight;
+        if(w>maxDim||h>maxDim){if(w>h){h=Math.round(h*maxDim/w);w=maxDim}else{w=Math.round(w*maxDim/h);h=maxDim}}
+        const c=document.createElement('canvas');c.width=w;c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        c.toBlob(b=>{URL.revokeObjectURL(url);resolve(b?new File([b],file.name.replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):file)},'image/jpeg',quality||0.72);
+      }catch(_){URL.revokeObjectURL(url);resolve(file)}
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);resolve(file)};
+    img.src=url;
+  });
+}
 async function upload(file,id){
-  if(file.size>12*1024*1024)throw Error('Foto maksimal 12 MB.');
+  if(file.size>25*1024*1024)throw Error('Foto maksimal 25 MB.');
+  let toSend=file;
+  if(file.type.startsWith('image/')){
+    try{toSend=await compressImage(file,1600,0.72);}catch(_){toSend=file;}
+  }
   const up='UP-'+Date.now()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();
-  await postForm({action:'UPLOAD_PHOTO_BASE64',upload_id:up,finding_id:id,mime:file.type||'image/jpeg',filename:file.name,data_base64:await fileData(file)});
-  for(let i=0;i<30;i++){
-    await new Promise(r=>setTimeout(r,500));
+  await postForm({action:'UPLOAD_PHOTO_BASE64',upload_id:up,finding_id:id,mime:toSend.type||'image/jpeg',filename:toSend.name,data_base64:await fileData(toSend)},120000);
+  // Polling diperpanjang jadi 2 menit (120 x 1 detik) untuk koneksi lambat.
+  for(let i=0;i<120;i++){
+    await new Promise(r=>setTimeout(r,1000));
     const j=await jsonGet('GET_UPLOAD_STATUS',{upload_id:up});
     if(j.status==='success'&&j.url)return j.url;
     if(j.status==='error')throw Error(j.message||'Upload foto gagal');
   }
-  throw Error('Upload foto timeout');
+  throw Error('Upload foto timeout — coba lagi di area dengan sinyal lebih baik.');
 }
 function viewer(src,meta){$('viewerImg').src=src;$('viewerMeta').textContent=meta;$('viewer').classList.add('open')}
 function closeV(){$('viewer').classList.remove('open');$('viewerImg').src=''}
