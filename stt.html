@@ -4910,10 +4910,13 @@ renderAreas();
     }finally{checking=false;}
   }
 
+  let _adminPanelWasVisible=false;
   function updateAdminPanel(){
     const box=document.getElementById('sttUserAccessManager');if(!box)return;
-    box.style.display=window.adminUnlocked?'block':'none';
-    if(window.adminUnlocked)loadUserList();
+    const visible=!!window.adminUnlocked;
+    box.style.display=visible?'block':'none';
+    if(visible&&!_adminPanelWasVisible)loadUserList(); // load sekali saat panel baru terbuka, JANGAN tiap tick
+    _adminPanelWasVisible=visible;
   }
 
   function installAdminControls(){

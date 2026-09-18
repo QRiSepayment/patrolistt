@@ -140,8 +140,15 @@ async function saveFinding(id){
   f.status=el.querySelector('[data-status="'+CSS.escape(id)+'"]:checked')?.value||f.status;
   try{setState('⏳ MENYIMPAN...',false);await saveObject(f);await sync()}catch(e){alert('❌ '+e.message)}
 }
-async function saveObject(f){await postForm({action:'SAVE_FINDING',finding_id:f.finding_id,area_code:f.area_code,photo_url:JSON.stringify(f.photo_url||[]),description:f.description||'',finder_name:f.finder_name||'Petugas',created_at:f.created_at,status:f.status||'OPEN'})}
-async function delFinding(id){if(!confirm('HAPUS FINDING INI DARI CENTRAL? FOTO DI GOOGLE DRIVE TIDAK DIHAPUS OTOMATIS.'))return;try{setState('⏳ MENGHAPUS...',false);await postForm({action:'DELETE_FINDING',finding_id:id});await sync()}catch(e){alert('❌ '+e.message)}}
+async function postJson(data){
+  if(!API)throw Error('URL GAS belum diisi di source finding-notes.html.');
+  const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(data).toString()});
+  const j=await r.json();
+  if(!j||(j.status!=='success'&&j.ok!==true))throw Error((j&&(j.message||j.error))||'Gagal menyimpan ke Central.');
+  return j;
+}
+async function saveObject(f){await postJson({action:'SAVE_FINDING',finding_id:f.finding_id,area_code:f.area_code,photo_url:JSON.stringify(f.photo_url||[]),description:f.description||'',finder_name:f.finder_name||'Petugas',created_at:f.created_at,status:f.status||'OPEN'})}
+async function delFinding(id){if(!confirm('HAPUS FINDING INI DARI CENTRAL? FOTO DI GOOGLE DRIVE TIDAK DIHAPUS OTOMATIS.'))return;try{setState('⏳ MENGHAPUS...',false);await postJson({action:'DELETE_FINDING',finding_id:id});await sync()}catch(e){alert('❌ '+e.message)}}
 async function removePhoto(id,index){const f=findings.find(x=>String(x.finding_id)===String(id));if(!f||!confirm('HAPUS FOTO INI DARI DATA FINDING? FILE DI DRIVE TETAP ADA.'))return;f.photo_url.splice(index,1);try{await saveObject(f);await sync()}catch(e){alert('❌ '+e.message)}}
 function wire(){
   document.querySelectorAll('[data-add-area]').forEach(b=>b.onclick=()=>openNew(b.dataset.addArea));
@@ -178,21 +185,12 @@ async function sync(){
   try{
     setState('⏳ SINKRONISASI CENTRAL...',false);
     const j=await jsonGet('GET_FINDINGS');
+    // Backend berhasil dihubungi -> data server SELALU menang, apapun isinya
+    // (termasuk kalau memang 0), supaya semua device selalu sinkron sama persis.
     const remote=Array.isArray(j.data)?j.data.map(x=>({...x,photo_url:Array.isArray(x.photo_url)?x.photo_url:[]})):[];
-    const cache=readSttCache();
-    // Jika backend mengembalikan kosong, tetapi STT pada perangkat yang sama
-    // sudah memiliki cache Central yang valid, tampilkan cache agar finding
-    // tidak terlihat hilang hanya karena halaman fn.html memakai versi/deployment
-    // backend yang belum ter-refresh. Jika revision berbeda, backend tetap menang.
-    if(remote.length){
-      findings=remote;
-      try{localStorage.setItem('STT_FINDING_CENTRAL_CACHE_V16',JSON.stringify({findings:remote,revision:String(j.revision||cache.revision||''),updatedAt:Date.now()}));}catch(_){ }
-      render();setState('● CENTRAL ONLINE • '+findings.length+' FINDING',true);return;
-    }
-    if(cache.findings.length && (!j.revision || !cache.revision || String(j.revision)===cache.revision)){
-      findings=cache.findings;render();setState('● CENTRAL ONLINE • '+findings.length+' FINDING • CACHE TERVERIFIKASI',true);return;
-    }
-    findings=[];render();setState('● CENTRAL ONLINE • 0 FINDING',true);
+    findings=remote;
+    try{localStorage.setItem('STT_FINDING_CENTRAL_CACHE_V16',JSON.stringify({findings:remote,revision:String(j.revision||''),updatedAt:Date.now()}));}catch(_){ }
+    render();setState('● CENTRAL ONLINE • '+findings.length+' FINDING',true);
   }catch(e){
     const cache=readSttCache();
     if(cache.findings.length){
