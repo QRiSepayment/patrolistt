@@ -30,24 +30,42 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&
 function setState(t,ok=false){const el=$('apiState');if(el){el.textContent=t;el.style.color=ok?'#059669':'#64748b';}}
 function dateFmt(v){if(!v)return '-';const d=new Date(v);return isNaN(d)?String(v):d.toLocaleDateString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric'})}
 function timeFmt(v){if(!v)return '-';const d=new Date(v);return isNaN(d)?String(v):d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
-async function jsonGet(action,params={}){
+
+/* ============================================================
+   [FIX #1] jsonGet — nonce unik + 3x retry + no-cache header
+   Masalah lama: Google CDN & browser kadang serve respons lama
+   untuk /exec, sehingga device B tidak dapat data terbaru.
+   ============================================================ */
+async function jsonGet(action, params={}){
   if(!API) throw Error('URL GAS belum diisi di source finding-notes.html.');
-  const q=new URLSearchParams({action,...params,t:String(Date.now())});
+  // Cache-buster kuat: timestamp + random + versi
+  const nonce = Date.now() + '_' + Math.random().toString(36).slice(2, 12);
+  const q = new URLSearchParams({ action, ...params, t: nonce, _: nonce, v: '17' });
   let lastErr;
-  for(let attempt=0;attempt<2;attempt++){
+  for(let attempt = 0; attempt < 3; attempt++){          // ← 3x retry (bukan 2x)
     try{
-      const r=await fetch(API+'?'+q.toString(),{cache:'no-store'});
-      const j=await r.json();
-      if(j.status!=='success'&&j.status!=='pending') throw Error(j.message||'Central error');
+      const r = await fetch(API + '?' + q.toString(), {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      const j = await r.json();
+      if(j.status !== 'success' && j.status !== 'pending')
+        throw Error(j.message || 'Central error');
       return j;
     }catch(e){
-      lastErr=e;
-      // Respons bukan JSON (kena limit/quota Google sesaat) -> coba sekali lagi.
-      if(attempt===0)await new Promise(r=>setTimeout(r,1500));
+      lastErr = e;
+      if(attempt < 2) await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
     }
   }
-  throw Error(/json/i.test(String(lastErr&&lastErr.message))?'Central sedang sibuk (limit Google sesaat), coba lagi.':(lastErr&&lastErr.message)||'Central error');
+  throw Error(/json/i.test(String(lastErr && lastErr.message))
+    ? 'Central sedang sibuk (limit Google sesaat), coba lagi.'
+    : (lastErr && lastErr.message) || 'Central error');
 }
+
 function postForm(data,timeoutMs){return new Promise((res,rej)=>{
   if(!API)return rej(Error('URL GAS belum diisi di source finding-notes.html.'));
   const id='if_'+Date.now()+'_'+Math.random().toString(36).slice(2);
@@ -197,34 +215,139 @@ function openNew(area=''){
   $('nSave').onclick=async()=>{const ar=$('nArea').value.trim(),desc=$('nDesc').value.trim();if(!ar||!desc)return alert('AREA dan FINDING NOTES wajib diisi.');const id='FIND-'+Date.now()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();const f={finding_id:id,area_code:ar,finder_name:$('nFinder').value.trim()||'Petugas',description:desc,photo_url:[],created_at:new Date(`${$('nDate').value}T${$('nTime').value||'00:00:00'}`).toISOString(),status:'OPEN'};const failedPhotos=[];for(const file of files){try{f.photo_url.push(await upload(file,id))}catch(e){failedPhotos.push(file.name+': '+e.message)}}try{await saveObject(f);box.innerHTML='';await sync();if(failedPhotos.length)alert('⚠️ FINDING TERSIMPAN, TAPI '+failedPhotos.length+' FOTO GAGAL UPLOAD:\n'+failedPhotos.join('\n'));else alert('✅ FINDING TERSIMPAN DI CENTRAL.')}catch(e){alert('❌ FINDING GAGAL TERSIMPAN: '+e.message+(failedPhotos.length?'\n(Foto yang sempat terupload: '+f.photo_url.length+')':''))}};
   box.scrollIntoView({behavior:'smooth',block:'center'});
 }
+
+/* ============================================================
+   [FIX #2] readSttCache — tambah TTL 1 jam + normalisasi photo_url
+   Masalah lama: cache dari 3 hari lalu tetap dipakai, bikin device
+   B tampilkan data lama yang beda dengan device A.
+   ============================================================ */
+const CACHE_TTL_MS = 1000 * 60 * 60; // 1 jam
+
 function readSttCache(){
   try{
-    const raw=localStorage.getItem('STT_FINDING_CENTRAL_CACHE_V16');
-    const x=JSON.parse(raw||'{}');
-    const list=Array.isArray(x.findings)?x.findings:[];
-    return {findings:list.map(v=>({...v,photo_url:Array.isArray(v?.photo_url)?v.photo_url:[]})),revision:String(x.revision||'')};
-  }catch(_){return {findings:[],revision:''};}
+    const raw = localStorage.getItem('STT_FINDING_CENTRAL_CACHE_V16');
+    const x = JSON.parse(raw || '{}');
+    const list = Array.isArray(x.findings) ? x.findings : [];
+    const updatedAt = Number(x.updatedAt || 0);
+    const isFresh = updatedAt > 0 && (Date.now() - updatedAt) < CACHE_TTL_MS;
+    return {
+      findings: list.map(v => ({
+        ...v,
+        // Normalisasi photo_url: handle string, object {url:...}, atau array campuran
+        photo_url: (Array.isArray(v?.photo_url) ? v.photo_url : [])
+          .map(p => typeof p === 'string' ? p : String(p?.url || ''))
+          .filter(p => /^https?:\/\//i.test(p))
+      })),
+      revision: String(x.revision || ''),
+      updatedAt,
+      isFresh
+    };
+  }catch(_){
+    return { findings: [], revision: '', updatedAt: 0, isFresh: false };
+  }
 }
+
+/* ============================================================
+   [FIX #3] sync — fallback cache HANYA jika fresh + log Console
+   Masalah lama: kalau GET_FINDINGS gagal, device langsung pakai
+   cache lama (yang bisa beda dengan device lain). Sekarang cache
+   basi > 1 jam TIDAK dipakai.
+   ============================================================ */
 async function sync(){
   if(!API){setState('⚠️ CENTRAL BELUM TERHUBUNG — CEK GAS_API_ENDPOINTS DI SOURCE HTML.',false);return}
   try{
     setState('⏳ SINKRONISASI CENTRAL...',false);
     const j=await jsonGet('GET_FINDINGS');
+    const serverRev=String(j.revision||'0');
     // Backend berhasil dihubungi -> data server SELALU menang, apapun isinya
     // (termasuk kalau memang 0), supaya semua device selalu sinkron sama persis.
-    const remote=Array.isArray(j.data)?j.data.map(x=>({...x,photo_url:Array.isArray(x.photo_url)?x.photo_url:[]})):[];
+    const remote=Array.isArray(j.data)?j.data.map(x=>({
+      ...x,
+      // Normalisasi: pastikan photo_url = array of URL string
+      photo_url:(Array.isArray(x.photo_url)?x.photo_url:[])
+        .map(p=>typeof p==='string'?p:String(p?.url||''))
+        .filter(p=>/^https?:\/\//i.test(p))
+    })):[];
     findings=remote;
-    try{localStorage.setItem('STT_FINDING_CENTRAL_CACHE_V16',JSON.stringify({findings:remote,revision:String(j.revision||''),updatedAt:Date.now()}));}catch(_){ }
-    render();setState('● CENTRAL ONLINE • '+findings.length+' FINDING',true);
+    try{
+      localStorage.setItem('STT_FINDING_CENTRAL_CACHE_V16',JSON.stringify({
+        findings:remote,
+        revision:serverRev,
+        updatedAt:Date.now()
+      }));
+    }catch(_){ }
+    render();
+    setState('● CENTRAL ONLINE • '+findings.length+' FINDING',true);
+    console.log('[SYNC] revision='+serverRev+' findings='+findings.length);
   }catch(e){
+    console.error('[SYNC] error:',e);
     const cache=readSttCache();
-    if(cache.findings.length){
-      findings=cache.findings;render();setState('⚠️ CENTRAL BELUM TERBACA • MENAMPILKAN CACHE TERAKHIR ('+findings.length+' FINDING)',false);return;
+    // HANYA pakai cache kalau masih fresh (dalam 1 jam terakhir)
+    if(cache.findings.length && cache.isFresh){
+      findings=cache.findings;
+      render();
+      const ageMin=Math.round((Date.now()-cache.updatedAt)/60000);
+      setState('⚠️ CENTRAL OFFLINE • CACHE '+ageMin+' MENIT LALU ('+findings.length+' FINDING)',false);
+      return;
     }
-    setState('⚠️ CENTRAL OFFLINE • '+e.message,false);
+    // Cache basi atau kosong -> kosongkan, jangan tampilkan data lama
+    findings=[];
+    render();
+    setState('⚠️ CENTRAL OFFLINE • '+e.message+' • CACHE SUDAH BASI',false);
   }
 }
 $('syncBtn').onclick=sync;$('addBtn').onclick=()=>openNew('');sync();
+
+/* ============================================================
+   [FIX #4] AUTO-SYNC POLLING — semua device selalu sinkron
+   Device lain otomatis update dalam max 25 detik tanpa klik SYNC.
+   ============================================================ */
+(function(){
+  const SYNC_INTERVAL = 25000;   // 25 detik
+  let syncTimer = null;
+
+  async function autoSync(){
+    try{
+      // Skip kalau user sedang mengetik / edit / modal terbuka
+      if(document.querySelector('.new') || document.querySelector('.finding.editing')) return;
+      if(document.querySelector('.viewer.open')) return;
+      await sync();
+    }catch(e){
+      /* diamkan — sync() sudah handle error */
+    }
+  }
+
+  function schedule(){
+    if(syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(async () => {
+      await autoSync();
+      schedule();
+    }, SYNC_INTERVAL);
+  }
+
+  // 1. Tab visible lagi (user balik dari app lain)
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible'){
+      console.log('[AUTO-SYNC] tab visible → sync');
+      autoSync();
+    }
+  });
+
+  // 2. Koneksi balik online
+  window.addEventListener('online', () => {
+    console.log('[AUTO-SYNC] online → sync');
+    autoSync();
+  });
+
+  // 3. Fokus kembali ke window
+  window.addEventListener('focus', () => {
+    console.log('[AUTO-SYNC] window focus → sync');
+    autoSync();
+  });
+
+  schedule();
+  console.log('[AUTO-SYNC] aktif setiap ' + (SYNC_INTERVAL/1000) + ' detik');
+})();
 </script>
 <style id="sttAppVideoGateStyle">
 #sttAppVideoGate{
