@@ -4797,7 +4797,10 @@ renderAreas();
  });
 })();
 </script>
-<!-- STT DEVICE ACCESS CONTROL v2: central status, pending does NOT lock the app -->
+<!-- STT DEVICE ACCESS CONTROL v3: central status + wajib kode aktivasi.
+     Device baru (PENDING) dan device yang diblokir (BLOCKED) sama-sama
+     mengunci total aplikasi. Hanya status ALLOWED yang membuka akses —
+     didapat lewat kode aktivasi (self-service) atau tombol admin manual. -->
 <script id="STT_DEVICE_ACCESS_CONTROL_V2_CENTRAL">
 (function(){
   'use strict';
@@ -4810,6 +4813,8 @@ renderAreas();
   const cached=()=>{try{return norm(localStorage.getItem(STATUS_KEY)||'pending')}catch(e){return 'pending'}};
   status=cached();
 
+  let activating=false;
+
   function css(){
     if(document.getElementById('sttDeviceAccessCssV2'))return;
     const st=document.createElement('style');st.id='sttDeviceAccessCssV2';
@@ -4820,26 +4825,51 @@ renderAreas();
       #sttDeviceBlockedGate h2{margin:0 0 10px;color:#b42318;font-size:23px}
       #sttDeviceBlockedGate p{color:#475569;line-height:1.55;margin:8px 0}
       #sttDeviceBlockedGate .dac-id{background:#f1f5f9;border-radius:12px;padding:12px;font-weight:800;word-break:break-all;margin:14px 0}
-      #sttDeviceBlockedGate .dac-msg{font-size:13px;color:#64748b;min-height:20px;margin-top:8px}
+      #sttDeviceBlockedGate .dac-msg{font-size:13px;color:#64748b;min-height:20px;margin-top:8px;white-space:pre-line}
+      #sttDeviceBlockedGate .dac-input{width:100%;box-sizing:border-box;padding:13px;border:2px solid #cbd5e1;border-radius:12px;font-size:16px;font-weight:700;margin-top:10px}
+      #sttDeviceBlockedGate .dac-input:focus{outline:none;border-color:#0b3d91}
+      #sttDeviceBlockedGate .dac-btn{width:100%;border:0;border-radius:12px;padding:13px;margin-top:12px;font-weight:800;font-size:15px;background:#0b3d91;color:#fff;cursor:pointer}
+      #sttDeviceBlockedGate .dac-btn:disabled{opacity:.6;cursor:default}
     `;
     document.head.appendChild(st);
   }
 
-  function lockBlocked(){
-    css(); document.body.classList.add('stt-device-locked');
-    let el=document.getElementById('sttDeviceBlockedGate');
-    if(!el){
-      el=document.createElement('div');el.id='sttDeviceBlockedGate';
-      el.innerHTML=`<div class="dac-card">
+  function gateHTML(kind){
+    if(kind==='blocked'){
+      return `<div class="dac-card">
         <h2>🚫 PERANGKAT DIBLOKIR</h2>
-        <p>Perangkat ini diblokir oleh ADMIN melalui CENTRAL. Hubungi ADMIN untuk mengaktifkan kembali perangkat.</p>
+        <p>Perangkat ini diblokir oleh ADMIN melalui CENTRAL. Hubungi ADMIN untuk mengaktifkan kembali perangkat ini.</p>
         <div class="dac-id">Installation ID<br><span id="dacBlockedId"></span></div>
-        <button id="dacBlockedRetry" style="width:100%;border:0;border-radius:12px;padding:13px;margin-top:8px;font-weight:800;font-size:15px;background:#0b3d91;color:#fff">CEK ULANG STATUS</button>
+        <button id="dacBlockedRetry" type="button" class="dac-btn">CEK ULANG STATUS</button>
         <div id="dacBlockedMsg" class="dac-msg"></div>
       </div>`;
+    }
+    return `<div class="dac-card">
+      <h2>🔒 PERANGKAT BELUM DIAKTIFKAN</h2>
+      <p>Perangkat baru otomatis terkunci. Hubungi ADMIN untuk minta izin + <b>Kode Aktivasi</b>, lalu masukkan di bawah ini.</p>
+      <div class="dac-id">Installation ID<br><span id="dacBlockedId"></span></div>
+      <input id="dacActUser" class="dac-input" placeholder="Username / Nama Anda" autocomplete="off">
+      <input id="dacActCode" class="dac-input" placeholder="Kode Aktivasi" autocomplete="off" autocapitalize="characters">
+      <button id="dacActSubmit" type="button" class="dac-btn">🔓 AKTIVASI PERANGKAT</button>
+      <div id="dacBlockedMsg" class="dac-msg"></div>
+    </div>`;
+  }
+
+  function lockGate(kind){
+    css(); document.body.classList.add('stt-device-locked');
+    let el=document.getElementById('sttDeviceBlockedGate');
+    if(!el||el.dataset.kind!==kind){
+      if(el)el.remove();
+      el=document.createElement('div');el.id='sttDeviceBlockedGate';el.dataset.kind=kind;
+      el.innerHTML=gateHTML(kind);
       document.body.appendChild(el);
       el.querySelector('#dacBlockedId').textContent=deviceId||'UNKNOWN';
-      el.querySelector('#dacBlockedRetry').onclick=()=>checkCentral(true);
+      if(kind==='blocked'){
+        el.querySelector('#dacBlockedRetry').onclick=()=>checkCentral(true);
+      }else{
+        el.querySelector('#dacActSubmit').onclick=submitActivation;
+        el.querySelector('#dacActCode').addEventListener('keydown',e=>{if(e.key==='Enter')submitActivation();});
+      }
     }
   }
 
@@ -4850,16 +4880,50 @@ renderAreas();
 
   function apply(v){
     v=norm(v); status=v; cache(v);
-    // IMPORTANT: PENDING/UNKNOWN/ALLOWED must never lock the application.
-    if(v==='blocked') lockBlocked(); else unlock();
+    // Hanya status ALLOWED yang boleh membuka aplikasi.
+    // PENDING (device baru) dan BLOCKED (dicabut admin) sama-sama mengunci total.
+    if(v==='blocked') lockGate('blocked');
+    else if(v==='allowed') unlock();
+    else lockGate('pending');
     updateAdminPanel();
+  }
+
+  async function submitActivation(){
+    if(activating)return;
+    const el=document.getElementById('sttDeviceBlockedGate');if(!el)return;
+    const userEl=el.querySelector('#dacActUser'),codeEl=el.querySelector('#dacActCode'),msgEl=el.querySelector('#dacBlockedMsg'),btn=el.querySelector('#dacActSubmit');
+    const userName=(userEl&&userEl.value||'').trim();
+    const code=(codeEl&&codeEl.value||'').trim();
+    if(msgEl)msgEl.textContent='';
+    if(!code){if(msgEl)msgEl.textContent='Kode aktivasi wajib diisi.';return;}
+    if(!CENTRAL){if(msgEl)msgEl.textContent='URL CENTRAL belum dipasang.';return;}
+    activating=true;if(btn){btn.disabled=true;btn.textContent='⏳ MEMERIKSA...';}
+    try{
+      if(userName){try{localStorage.setItem('stt_user_name',userName)}catch(e){}}
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'DEVICE_ACTIVATE',installation_id:deviceId,activation_code:code,user_name:userName,app:'STT',device:navigator.userAgent||'',android:navigator.userAgent||'',app_version:window.STT_APP_VERSION||''}).toString()});
+      const j=await r.json();
+      const d=j&&(j.data||j.device||j);
+      const st=norm(d&&d.status);
+      if(j&&j.ok!==false&&st==='allowed'){
+        apply('allowed');
+      }else{
+        const m=(j&&(j.message||j.error))||'Kode aktivasi salah.';
+        if(msgEl)msgEl.textContent='❌ '+m;
+      }
+    }catch(e){
+      if(msgEl)msgEl.textContent='❌ Gagal menghubungi CENTRAL. Periksa koneksi internet.';
+    }finally{
+      activating=false;
+      const btn2=document.getElementById('dacActSubmit');
+      if(btn2){btn2.disabled=false;btn2.textContent='🔓 AKTIVASI PERANGKAT';}
+    }
   }
 
   async function checkCentral(showMsg){
     if(checking)return;
     if(!CENTRAL){
-      // Backend URL not configured yet: keep STT usable, never lock on pending.
-      apply(status==='blocked'?'blocked':'pending');
+      // URL backend belum dipasang: jangan kunci, supaya masih bisa dites/setup.
+      apply(status==='blocked'?'blocked':'allowed');
       return;
     }
     checking=true;
@@ -4870,10 +4934,10 @@ renderAreas();
       const d=j&&(j.data||j.device||j);
       const st=norm(d&&d.status);
       apply(st||'pending');
-      const m=document.getElementById('dacBlockedMsg');if(m)m.textContent='Status CENTRAL: '+(st||'PENDING').toUpperCase();
+      const m=document.getElementById('dacBlockedMsg');if(m&&status==='blocked')m.textContent='Status CENTRAL: '+(st||'PENDING').toUpperCase();
     }catch(e){
-      // Network failure must not lock a previously usable device.
-      if(status!=='blocked')apply('pending');
+      // Kegagalan jaringan TIDAK BOLEH menurunkan status device yang sudah ALLOWED
+      // (biarkan status tercache tetap dipakai, coba lagi di siklus berikutnya).
       const m=document.getElementById('dacBlockedMsg');if(m)m.textContent='CENTRAL belum dapat dihubungi. Coba lagi.';
     }finally{checking=false;}
   }
@@ -4898,26 +4962,65 @@ renderAreas();
     if(!box){
       box=document.createElement('div');box.id='sttDeviceAccessManager';box.className='card';box.style.cssText='margin-top:16px;border-left:5px solid #b42318;display:none';
       box.innerHTML=`<h3 style="margin:0 0 8px;color:var(--primary)">🔐 DEVICE ACCESS CONTROL</h3>
-        <div class="small">Kontrol akses device dari CENTRAL. Device baru otomatis tercatat sebagai PENDING. PENDING tidak mengunci aplikasi.</div>
+        <div class="small">Device baru otomatis TERKUNCI dan wajib memasukkan Kode Aktivasi. Tombol di bawah untuk override manual (izinkan paksa / blokir) khusus device ini.</div>
         <div style="margin:10px 0"><b>Installation ID:</b><div id="dacAdminId" style="font-weight:800;word-break:break-all;margin-top:5px"></div></div>
         <div id="dacAdminStatus" style="font-weight:800;margin:8px 0">STATUS CENTRAL: PENDING</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button id="dacAllowBtn" type="button" class="btn btn-primary">✅ IZINKAN DEVICE</button>
-          <button id="dacBlockBtn" type="button" class="btn btn-danger">🚫 BLOKIR DEVICE</button>
+          <button id="dacAllowBtn" type="button" class="btn btn-primary">✅ IZINKAN DEVICE INI</button>
+          <button id="dacBlockBtn" type="button" class="btn btn-danger">🚫 BLOKIR DEVICE INI</button>
+        </div>
+        <div style="margin:16px 0 0;padding:12px;background:#f1f5f9;border-radius:12px">
+          <div class="small" style="margin-bottom:6px"><b>🔑 Kode Aktivasi Saat Ini</b><br>Dibagikan ke petugas/device baru supaya bisa aktivasi sendiri.</div>
+          <div id="dacActCodeBox" style="font-weight:800;font-size:20px;letter-spacing:1px;word-break:break-all">••••••••</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button id="dacShowCodeBtn" type="button" class="btn btn-ghost">👁 TAMPILKAN KODE</button>
+            <button id="dacRotateCodeBtn" type="button" class="btn btn-warning">🔄 GANTI KODE</button>
+          </div>
         </div>`;
       admin.appendChild(box);
       box.querySelector('#dacAllowBtn').onclick=()=>centralSetStatus('allowed');
       box.querySelector('#dacBlockBtn').onclick=()=>{if(confirm('Blokir device ini melalui CENTRAL?'))centralSetStatus('blocked');};
+      box.querySelector('#dacShowCodeBtn').onclick=loadActivationCode;
+      box.querySelector('#dacRotateCodeBtn').onclick=rotateActivationCode;
     }
     const idEl=box.querySelector('#dacAdminId');if(idEl)idEl.textContent=deviceId||'UNKNOWN';
     updateAdminPanel();
   }
 
+  async function loadActivationCode(){
+    if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
+    const box=document.getElementById('sttDeviceAccessManager');
+    const codeBox=box&&box.querySelector('#dacActCodeBox');
+    try{
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'GET_ACTIVATION_CODE',admin_session:adminSessionToken||''}).toString()});
+      const j=await r.json();
+      if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal mengambil kode.');
+      if(codeBox)codeBox.textContent=j.activation_code||'-';
+    }catch(e){alert('❌ '+e.message);}
+  }
+
+  async function rotateActivationCode(){
+    if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
+    if(!confirm('Ganti kode aktivasi sekarang? Kode lama tidak akan berlaku lagi untuk device baru.'))return;
+    const custom=prompt('Masukkan kode aktivasi baru (kosongkan untuk dibuatkan otomatis):','');
+    if(custom===null)return;
+    try{
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'ROTATE_ACTIVATION_CODE',new_code:custom.trim(),admin_session:adminSessionToken||''}).toString()});
+      const j=await r.json();
+      if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal mengganti kode.');
+      const box=document.getElementById('sttDeviceAccessManager');
+      const codeBox=box&&box.querySelector('#dacActCodeBox');
+      if(codeBox)codeBox.textContent=j.activation_code||'-';
+      alert('✅ Kode aktivasi baru: '+j.activation_code+'\n\nSegera bagikan ke petugas yang berwenang.');
+    }catch(e){alert('❌ '+e.message);}
+  }
+
   document.addEventListener('DOMContentLoaded',()=>{
     css();
-    // Do NOT gate on startup. Only CENTRAL BLOCKED may lock the app.
-    unlock();
-    setTimeout(()=>checkCentral(false),700);
+    // Terapkan status tercache dulu (device baru = pending = langsung terkunci),
+    // baru cek ulang ke CENTRAL di background untuk konfirmasi/refresh status.
+    apply(cached());
+    setTimeout(()=>checkCentral(false),400);
     timer=setInterval(()=>checkCentral(false),30000);
     setTimeout(installAdminControls,900);
     setInterval(installAdminControls,2000);
