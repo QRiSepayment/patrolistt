@@ -5101,53 +5101,34 @@ async function getCentral(){if(!API)throw new Error('Central Web App URL belum d
 async function postJson(payload){
 if(!API)throw new Error('Central Web App URL belum dikonfigurasi.');
 const p=payload||{};
-return await retry(()=>new Promise((resolve,reject)=>{
-  const iframe=document.createElement('iframe');
-  iframe.name='stt_central_post_'+Date.now()+'_'+Math.random().toString(36).slice(2);
-  iframe.style.display='none';
-  const form=document.createElement('form');
-  form.method='POST';form.action=API;form.target=iframe.name;form.enctype='application/x-www-form-urlencoded';form.style.display='none';
-  const add=(name,value)=>{const i=document.createElement('input');i.type='hidden';i.name=name;i.value=String(value??'');form.appendChild(i);};
-  add('action',p.action||'');add('admin_session',adminSessionToken||'');add('token',adminSessionToken||'');
-  if(p.action==='SAVE_FINDING'){const d=p.data||{};add('finding_id',d.finding_id);add('area_code',d.area_code);add('photo_url',JSON.stringify(photosOf(d)));add('description',d.description);add('finder_name',d.finder_name);add('created_at',d.created_at);add('status',d.status);}
-  else if(p.action==='UPDATE_STATUS'){add('finding_id',p.finding_id);add('status',p.status);}
-  else if(p.action==='DELETE_FINDING'){add('finding_id',p.finding_id);}
-  else {add('payload',JSON.stringify(p));}
-  let done=false;const finish=(err)=>{if(done)return;done=true;clearTimeout(timer);iframe.remove();form.remove();err?reject(err):resolve(true);};
-  const timer=setTimeout(()=>finish(new Error('Central POST timeout.')),REQUEST_TIMEOUT);
-  iframe.onload=()=>setTimeout(()=>finish(null),350);
-  iframe.onerror=()=>finish(new Error('Central POST gagal.'));
-  document.body.appendChild(iframe);document.body.appendChild(form);
-  try{form.submit();}catch(e){finish(e);}
-}), 'Mengirim perubahan Central');
+const body={action:p.action||'',admin_session:adminSessionToken||'',token:adminSessionToken||''};
+if(p.action==='SAVE_FINDING'){const d=p.data||{};Object.assign(body,{finding_id:d.finding_id,area_code:d.area_code,photo_url:JSON.stringify(photosOf(d)),description:d.description,finder_name:d.finder_name,created_at:d.created_at,status:d.status});}
+else if(p.action==='UPDATE_STATUS'){Object.assign(body,{finding_id:p.finding_id,status:p.status});}
+else if(p.action==='DELETE_FINDING'){Object.assign(body,{finding_id:p.finding_id});}
+else {Object.assign(body,{payload:JSON.stringify(p)});}
+return await retry(async()=>{
+  const r=await fetchTimeout(API,{method:'POST',mode:'cors',credentials:'omit',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(body).toString()},REQUEST_TIMEOUT);
+  const j=await r.json();
+  if(!j||(j.status!=='success'&&j.ok!==true))throw new Error((j&&(j.message||j.error))||'Central POST gagal.');
+  return j;
+},'Mengirim perubahan Central');
 }
 async function uploadPhoto(blob,meta,index,total){
   if(!(blob instanceof Blob))throw new Error('Blob foto tidak valid.');
   if(blob.size>12*1024*1024)throw new Error('Foto terlalu besar (>12 MB).');
   if(!API)throw new Error('Central Web App URL belum dikonfigurasi.');
-  const uploadId='UP-'+Date.now()+'-'+Math.random().toString(36).slice(2,10).toUpperCase();
   const mime=String(meta.mime||blob.type||'image/jpeg').toLowerCase();
   const filename=String(meta.filename||('finding_'+Date.now()+'.jpg')).replace(/[\\/:*?"<>|]/g,'_').slice(0,100);
   const base64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||'').split(',').pop());r.onerror=()=>reject(new Error('Gagal membaca foto resolusi tinggi.'));r.readAsDataURL(blob);});
-  await retry(()=>new Promise((resolve,reject)=>{
-    const iframe=document.createElement('iframe');
-    iframe.name='stt_upload_'+uploadId;iframe.style.display='none';
-    const form=document.createElement('form');form.method='POST';form.action=API;form.target=iframe.name;form.enctype='application/x-www-form-urlencoded';form.style.display='none';
-    const add=(n,v)=>{const i=document.createElement('input');i.type='hidden';i.name=n;i.value=String(v??'');form.appendChild(i);};
-    add('action','UPLOAD_PHOTO_BASE64');add('admin_session',adminSessionToken||'');add('token',adminSessionToken||'');add('upload_id',uploadId);add('finding_id',meta.findingId||'');add('mime',mime);add('filename',filename);add('data_base64',base64);
-    let done=false;const finish=(err)=>{if(done)return;done=true;clearTimeout(timer);iframe.remove();form.remove();err?reject(err):resolve(true);};
-    const timer=setTimeout(()=>finish(new Error('Upload foto timeout.')),UPLOAD_TIMEOUT);
-    iframe.onload=()=>setTimeout(()=>finish(null),400);iframe.onerror=()=>finish(new Error('Upload foto gagal.'));
-    document.body.appendChild(iframe);document.body.appendChild(form);try{form.submit();}catch(e){finish(e);}
-  }),'Mengirim foto '+(index+1)+'/'+total);
-  // Polling diperpanjang jadi 2 menit (240 x 500ms) untuk koneksi lapangan yang lambat.
-  for(let i=0;i<240;i++){
-    await sleep(500);
-    const r=await fetchTimeout(API+'?action=GET_UPLOAD_STATUS&upload_id='+encodeURIComponent(uploadId)+'&t='+Date.now(),{cache:'no-store'},REQUEST_TIMEOUT);
-    if(r.ok){const j=await r.json();if(j.status==='success'&&j.url)return j.url;if(j.status==='error')throw new Error(j.message||'Upload foto gagal');}
-    progress('☁️ Upload foto resolusi tinggi '+(index+1)+'/'+total+'...',Math.round(((index+(i+1)/240)/Math.max(1,total))*70)+5);
-  }
-  throw new Error('Server belum menyelesaikan upload foto.');
+  progress('☁️ Upload foto '+(index+1)+'/'+total+'...',Math.round((index/Math.max(1,total))*70)+5);
+  return await retry(async()=>{
+    const body=new URLSearchParams({action:'UPLOAD_PHOTO_BASE64',admin_session:adminSessionToken||'',token:adminSessionToken||'',finding_id:meta.findingId||'',mime,filename,data_base64:base64}).toString();
+    const r=await fetchTimeout(API,{method:'POST',mode:'cors',credentials:'omit',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body},UPLOAD_TIMEOUT);
+    const j=await r.json();
+    if(j&&j.url)return j.url;
+    if(j&&j.photo&&j.photo.url)return j.photo.url;
+    throw new Error((j&&(j.message||j.error))||'Upload foto gagal.');
+  },'Mengirim foto '+(index+1)+'/'+total);
 }
 function blobFromFile(file){return new Promise((resolve,reject)=>{if(!file||!file.type.startsWith('image/'))return reject(new Error('File bukan gambar.'));const src=URL.createObjectURL(file);const img=new Image();img.onload=()=>{try{const MAX=1600,scale=Math.min(1,MAX/Math.max(img.naturalWidth||img.width,img.naturalHeight||img.height)),w=Math.max(1,Math.round((img.naturalWidth||img.width)*scale)),h=Math.max(1,Math.round((img.naturalHeight||img.height)*scale)),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d',{alpha:false,desynchronized:true}).drawImage(img,0,0,w,h);c.toBlob(b=>{URL.revokeObjectURL(src);b?resolve(b):reject(new Error('Gagal memproses foto.'));},'image/jpeg',.72);}catch(e){URL.revokeObjectURL(src);reject(e);}};img.onerror=()=>{URL.revokeObjectURL(src);reject(new Error('Foto tidak dapat dibaca.'));};img.src=src;});}
 function openPendingDb(){if(pendingDb)return Promise.resolve(pendingDb);return new Promise(resolve=>{const r=indexedDB.open(PENDING_DB,3);r.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains(PENDING_STORE))d.createObjectStore(PENDING_STORE);};r.onsuccess=()=>{pendingDb=r.result;resolve(pendingDb)};r.onerror=()=>resolve(null);});}

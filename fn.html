@@ -112,25 +112,13 @@ async function upload(file,id){
   if(file.type.startsWith('image/')){
     try{toSend=await compressImage(file,1280,0.65);}catch(_){toSend=file;}
   }
+  const base64=await fileData(toSend);
   for(let retry=0;retry<3;retry++){
     try{
-      const up='UP-'+Date.now()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();
-      await postForm({action:'UPLOAD_PHOTO_BASE64',upload_id:up,finding_id:id,mime:toSend.type||'image/jpeg',filename:toSend.name,data_base64:await fileData(toSend)},120000);
-      // Polling 3 menit (360 x 500ms) — cek lebih cepat, tahan error polling
-      for(let i=0;i<360;i++){
-        await new Promise(r=>setTimeout(r,500));
-        try{
-          const j=await jsonGet('GET_UPLOAD_STATUS',{upload_id:up});
-          if(j.status==='success'&&j.url)return j.url;
-          if(j.status==='error')throw Error(j.message||'Upload foto gagal');
-        }catch(pollErr){
-          // Kalau polling sendiri gagal (network drop), abaikan dan lanjut polling.
-          // Upload mungkin masih diproses server.
-          if(/INVALID|NOT_FOUND|REQUIRED/i.test(String(pollErr.message))) throw pollErr;
-          console.warn('[UPLOAD POLL] retry karena:',pollErr.message);
-        }
-      }
-      throw Error('Upload foto timeout — coba lagi di area dengan sinyal lebih baik.');
+      const j=await postJson({action:'UPLOAD_PHOTO_BASE64',finding_id:id,mime:toSend.type||'image/jpeg',filename:toSend.name,data_base64:base64});
+      if(j&&j.url)return j.url;
+      if(j&&j.photo&&j.photo.url)return j.photo.url;
+      throw Error('Upload foto gagal: URL tidak ditemukan di respons.');
     }catch(e){
       if(retry===2)throw e;
       console.warn('[UPLOAD RETRY '+(retry+1)+'/3]',e.message);
