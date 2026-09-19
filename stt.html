@@ -1963,7 +1963,7 @@ async function adminApi(action, payload={}){
   try{
     r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(body),cache:'no-store',signal:ctrl.signal});
   }catch(netErr){
-    if(netErr && netErr.name==='AbortError') throw new Error('TIMEOUT: backend tidak merespon 15 detik. Cek URL / & redeploy (New version).');
+    if(netErr && netErr.name==='AbortError') throw new Error('TIMEOUT: backend tidak merespon 15 detik. Cek URL /exec & redeploy (New version).');
     throw new Error('GAGAL_KONEKSI: '+(netErr?.message||netErr)+' — cek internet / URL GAS.');
   }finally{clearTimeout(timeoutId);}
   let j;
