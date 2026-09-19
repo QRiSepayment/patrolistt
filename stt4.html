@@ -4908,13 +4908,20 @@ renderAreas();
       <button id="ugSubmit" type="button" class="dac-btn">🔓 MASUK</button>
       <div id="ugMsg" class="dac-msg"></div>
       <button id="ugAdminKey" type="button" class="dac-btn2" style="background:#0b3d91">👑 MASUK SEBAGAI ADMIN (pertama kali)</button>
+      <div id="ugAdminKeyBox" style="display:none;margin-top:10px;text-align:left">
+        <input id="ugAdminKeyInput" class="dac-input" type="password" placeholder="Masukkan KUNCI ADMIN" autocomplete="off">
+        <button id="ugAdminKeySubmit" type="button" class="dac-btn" style="background:#0b3d91">KIRIM KUNCI ADMIN</button>
+        <div id="ugAdminKeyMsg" class="dac-msg"></div>
+      </div>
     </div>`;
   }
 
-  async function submitAdminKey(){
-    const pw=prompt('Masukkan KUNCI ADMIN (bukan username/password petugas):');
+  async function submitAdminKey(pw){
     if(!pw)return;
     if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
+    const msgEl=document.getElementById('ugAdminKeyMsg');
+    const setMsg=t=>{if(msgEl)msgEl.textContent=t;};
+    setMsg('⏳ Menghubungi backend ADMIN...');
     try{
       const j=await adminApi('AUTH_ADMIN',{password:pw});
       adminSessionToken=String(j.session_token||'');
@@ -4923,7 +4930,7 @@ renderAreas();
       apply('allowed');
       try{setAdminUi(true)}catch(e){}
       alert('✅ ADMIN aktif. Sekarang buat akun ADMIN kamu sendiri di panel USER ACCESS CONTROL supaya tidak perlu pakai kunci ini lagi.');
-    }catch(e){alert('❌ '+(e.message||'Kunci ADMIN salah.'));}
+    }catch(e){setMsg('❌ '+(e.message||'Kunci ADMIN salah.'));}
   }
 
   function lockGate(kind){
@@ -4941,7 +4948,13 @@ renderAreas();
       }else{
         el.querySelector('#ugSubmit').onclick=submitLogin;
         el.querySelector('#ugPass').addEventListener('keydown',e=>{if(e.key==='Enter')submitLogin();});
-        el.querySelector('#ugAdminKey').onclick=submitAdminKey;
+        el.querySelector('#ugAdminKey').onclick=()=>{
+          const box=el.querySelector('#ugAdminKeyBox');
+          box.style.display=box.style.display==='none'?'block':'none';
+          if(box.style.display==='block')el.querySelector('#ugAdminKeyInput').focus();
+        };
+        el.querySelector('#ugAdminKeySubmit').onclick=()=>submitAdminKey(el.querySelector('#ugAdminKeyInput').value);
+        el.querySelector('#ugAdminKeyInput').addEventListener('keydown',e=>{if(e.key==='Enter')submitAdminKey(el.querySelector('#ugAdminKeyInput').value);});
       }
     }
   }
