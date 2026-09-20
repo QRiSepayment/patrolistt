@@ -2331,28 +2331,13 @@ async function autoStorageCleanup() {
     console.log('🔄 Auto storage cleanup running...');
     
     try {
-        // 1. HAPUS DATA LAMA DARI LOCALSTORAGE (lebih dari 7 hari)
-        const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-        let cleanedCount = 0;
-        
-        Object.keys(patrolData).forEach(areaKey => {
-            const area = patrolData[areaKey];
-            const areaTimestamp = area.timestamp || 0;
-            
-            // Hapus area yang lebih dari 7 hari
-            if (areaTimestamp < oneWeekAgo) {
-                delete patrolData[areaKey];
-                cleanedCount++;
-                console.log(`🧹 Deleted old area: ${areaKey}`);
-            }
-        });
-        
-        if (cleanedCount > 0) {
-            persistMeta();
-            console.log(`✅ Auto cleanup: Deleted ${cleanedCount} old areas`);
-        }
-        
-        // 2. CLEANUP INDEXEDDB BLOBS YANG TIDAK TERPAKAI
+        // CATATAN: penghapusan otomatis AREA/FOTO berdasarkan umur DIHAPUS dari sini.
+        // Data laporan patroli tidak boleh hilang diam-diam tanpa konfirmasi user.
+        // Auto cleanup HANYA membersihkan sampah teknis (orphan blob/cache),
+        // TIDAK PERNAH menyentuh patrolData (area/foto/deskripsi).
+
+        // 1. CLEANUP INDEXEDDB BLOBS YANG TIDAK TERPAKAI (aman: cuma hapus blob yatim,
+        //    yaitu blob yang sudah tidak direferensikan oleh foto manapun)
         if (db) {
             const usedBlobKeys = new Set();
             
@@ -2420,67 +2405,69 @@ async function autoStorageCleanup() {
 
 // ==================== MANUAL DEEP CLEANUP ====================
 async function manualDeepCleanup() {
-    showOverlay('Deep cleanup - Optimizing storage...');
-    
+    // "Optimize Storage" SEKARANG CUMA bersihin sampah teknis — TIDAK PERNAH
+    // hapus area/laporan/foto. Kalau butuh hapus laporan lama, itu aksi
+    // eksplisit terpisah (bukan disembunyikan di balik tombol "optimize").
+    if (!confirm('🧹 OPTIMIZE STORAGE\n\nMembersihkan file sampah teknis (blob foto yatim & cache browser).\n\nTIDAK ADA laporan/foto yang akan dihapus.\n\nLanjutkan?')) return;
+
+    showOverlay('Optimizing storage...');
+
     try {
-        // 1. Hapus semua data lebih dari 3 hari
-        const threeDaysAgo = Date.now() - (3 * 24 * 60 * 60 * 1000);
-        let deletedAreas = 0;
-        
-        Object.keys(patrolData).forEach(areaKey => {
-            const area = patrolData[areaKey];
-            if ((area.timestamp || 0) < threeDaysAgo) {
-                delete patrolData[areaKey];
-                deletedAreas++;
+        let deletedBlobs = 0;
+        // 1. Hapus blob foto yatim (blob yang sudah tidak direferensikan patrolData manapun)
+        if (db) {
+            const usedBlobKeys = new Set();
+            Object.keys(patrolData).forEach(areaKey => {
+                (patrolData[areaKey].photos || []).forEach(photo => {
+                    if (photo && photo.ref) usedBlobKeys.add(photo.ref);
+                    if (photo && photo.masterRef) usedBlobKeys.add(photo.masterRef);
+                });
+            });
+            const tx = db.transaction([STORE_BLOBS], 'readonly');
+            const store = tx.objectStore(STORE_BLOBS);
+            const allKeys = await new Promise(resolve => {
+                const request = store.getAllKeys();
+                request.onsuccess = () => resolve(request.result);
+            });
+            for (const key of allKeys) {
+                if (!usedBlobKeys.has(key)) { await idbDelete(STORE_BLOBS, key); deletedBlobs++; }
             }
-        });
-        
-        // 2. Hapus 50% foto tertua jika masih banyak
-        const totalPhotos = Object.keys(patrolData).reduce((sum, k) => sum + (patrolData[k].photos || []).length, 0);
-        if (totalPhotos > 30) {
-            const targetPhotos = Math.floor(totalPhotos * 0.5);
-            let deletedPhotos = 0;
-            
-            for (const areaKey of Object.keys(patrolData)) {
-                const area = patrolData[areaKey];
-                const toDelete = Math.min(targetPhotos - deletedPhotos, area.photos.length);
-                
-                area.photos.splice(0, toDelete);
-                area.descriptions.splice(0, toDelete);
-                deletedPhotos += toDelete;
-                
-                if (deletedPhotos >= targetPhotos) break;
-            }
-            
-            console.log(`🗑️ Deleted ${deletedPhotos} old photos`);
         }
-        
-        // 3. Clear semua cache
+
+        // 2. Clear cache HTTP (blob foto TIDAK disentuh)
         if ('caches' in window) {
             const cacheNames = await caches.keys();
             await Promise.all(cacheNames.map(name => caches.delete(name)));
         }
-        
-        // 4. Optimize IndexedDB
-        if (db) {
-            // Recreate database untuk optimization
-            const dbName = db.name;
-            db.close();
-            indexedDB.deleteDatabase(dbName);
-            
-            // Reopen fresh database
-            await openDB();
-        }
-        
-        persistMeta();
-        renderAreas();
-        
+
         hideOverlay();
-        alert(`✅ Deep cleanup selesai!\n\n• ${deletedAreas} area lama dihapus\n• Storage dioptimalkan\n• Cache dibersihkan`);
-        
+        alert(`✅ Optimize Storage selesai!\n\n• ${deletedBlobs} file sampah teknis dibersihkan\n• Cache dibersihkan\n• Semua laporan & foto Lo tetap aman`);
+
     } catch (error) {
         hideOverlay();
-        alert('❌ Gagal deep cleanup: ' + error.message);
+        alert('❌ Gagal optimize storage: ' + error.message);
+    }
+}
+
+// Aksi terpisah & eksplisit: hapus laporan lama (>3 hari) BESERTA fotonya.
+// Ini yang dulu nyempil di dalam "Optimize Storage" — sekarang jadi aksi sendiri
+// yang jelas namanya dan wajib dikonfirmasi dengan rincian.
+async function deleteOldReports() {
+    const threeDaysAgo = Date.now() - (3 * 24 * 60 * 60 * 1000);
+    const areasToDelete = Object.keys(patrolData).filter(k => (patrolData[k].timestamp || 0) < threeDaysAgo);
+    if (!areasToDelete.length) { alert('Tidak ada laporan lebih dari 3 hari.'); return; }
+    if (!confirm(`⚠️ HAPUS LAPORAN LAMA\n\n${areasToDelete.length} area (lebih dari 3 hari) beserta SEMUA fotonya akan DIHAPUS PERMANEN.\n\nPastikan sudah di-export ke PDF/Word.\n\nLanjutkan?`)) return;
+
+    showOverlay('Menghapus laporan lama...');
+    try {
+        areasToDelete.forEach(k => delete patrolData[k]);
+        persistMeta();
+        renderAreas();
+        hideOverlay();
+        alert(`✅ ${areasToDelete.length} laporan lama dihapus.`);
+    } catch (error) {
+        hideOverlay();
+        alert('❌ Gagal menghapus laporan lama: ' + error.message);
     }
 }
 
@@ -2491,6 +2478,13 @@ function setupSuperCleanup() {
   superCleanupBtn.addEventListener('click', async () => {
     // Tampilkan konfirmasi final
     if (!confirm(`💥 SUPER CLEAN-UP - ONE CLICK SOLUTION\n\nAKAN MELAKUKAN:\n• Hapus SEMUA data patroli\n• Hapus SEMUA foto\n• Reset SEMUA pengaturan\n• Clear SEMUA cache\n• Aplikasi akan reload otomatis\n\nYAKIN INI SOLUSI YANG DIPERLUKAN?`)) {
+      return;
+    }
+    // Lapisan kedua: wajib ketik "HAPUS SEMUA" — mencegah tap gak sengaja
+    // menghapus SELURUH database (factory reset), bukan cuma "yakin?".
+    const typed = prompt('Untuk melanjutkan, ketik persis: HAPUS SEMUA');
+    if (typed !== 'HAPUS SEMUA') {
+      alert('Dibatalkan. Ketikan tidak cocok, tidak ada data yang dihapus.');
       return;
     }
     
@@ -2888,8 +2882,7 @@ function setupSuperCleanup() {
     const compressed = await compressDataUrl(raw, 0.98, 2400);
     if(!compressed) throw new Error('Foto gagal diproses.');
 
-    officerPhotoBlob = file;
-    officerPhotoDataUrl = raw;
+    officerPhotoDataUrl = compressed; // pakai versi terkompresi, bukan raw asli (raw bisa s/d 8MB)
     window.STT_OFFICER_PHOTO_PREVIEW = compressed;
     officerPhotoRef = 'memory_officer_face';
 
@@ -2942,50 +2935,90 @@ function setupSuperCleanup() {
   });
 
   // ==================== IMAGE HELPERS ====================
-  function fileToDataURL(file){ 
-    return new Promise((res)=>{ 
-      const fr=new FileReader(); 
-      fr.onload=()=>res(fr.result); 
-      fr.onerror=()=>res(null); 
-      fr.readAsDataURL(file); 
-    }); 
+  // ==================== UNIFIED PHOTO PIPELINE (single-decode) ====================
+  // Sebelumnya 1 foto di-decode 2x (sekali untuk preview via <img>+base64,
+  // sekali lagi untuk master via createImageBitmap) plus base64 dataURL
+  // round-trip (fileToDataURL -> toDataURL -> fetch().blob()). Untuk foto
+  // kamera HP modern (mis. 4000x3000px), 1x decode saja sudah butuh puluhan
+  // MB bitmap sementara di memori WebView; decode 2x per foto = 2x beban itu.
+  // Fungsi ini decode ORIGINAL file HANYA SEKALI (createImageBitmap, tanpa
+  // base64 sama sekali), lalu hasil bitmap dipakai ulang untuk preview & master.
+  function fileToDataURL(file){
+    return new Promise((res)=>{
+      const fr=new FileReader();
+      fr.onload=()=>res(fr.result);
+      fr.onerror=()=>res(null);
+      fr.readAsDataURL(file);
+    });
   }
-  
-  function compressDataUrl(dataUrl, quality=0.98, maxSize=4096){ 
-    return new Promise((res)=>{ 
-      const img=new Image(); 
-      img.onload=function(){ 
-        let w=img.width,h=img.height; 
-        
+
+  function compressDataUrl(dataUrl, quality=0.85, maxSize=1600){
+    return new Promise((res)=>{
+      const img=new Image();
+      img.onload=function(){
+        let w=img.width,h=img.height;
         if(w > maxSize || h > maxSize){
-          if(w>h && w>maxSize){ 
-            h=Math.round(h*maxSize/w); 
-            w=maxSize; 
-          } else if(h>=w && h>maxSize){ 
-            w=Math.round(w*maxSize/h); 
-            h=maxSize; 
-          } 
+          if(w>h && w>maxSize){ h=Math.round(h*maxSize/w); w=maxSize; }
+          else if(h>=w && h>maxSize){ w=Math.round(w*maxSize/h); h=maxSize; }
         }
-        
-        const c=document.createElement('canvas'); 
-        c.width=w; 
-        c.height=h; 
-        const ctx=c.getContext('2d'); 
-        
+        const c=document.createElement('canvas');
+        c.width=w; c.height=h;
+        const ctx=c.getContext('2d');
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img,0,0,w,h); 
-        try{ 
-          res(c.toDataURL('image/jpeg', quality)); 
-        }catch(e){ 
-          res(dataUrl); 
-        } 
-      }; 
-      img.onerror=function(){ 
-        res(dataUrl); 
-      }; 
-      img.src=dataUrl; 
-    }); 
+        ctx.drawImage(img,0,0,w,h);
+        try{ res(c.toDataURL('image/jpeg', quality)); }catch(e){ res(dataUrl); }
+      };
+      img.onerror=function(){ res(dataUrl); };
+      img.src=dataUrl;
+    });
   }
+
+  function makePhotoPair_(file, previewMax=1600, previewQ=0.85, masterMax=1600, masterQ=0.82){
+    const maxTarget=Math.max(previewMax,masterMax);
+    const drawScaled=(source,sw,sh,maxSize)=>{
+      let w=sw,h=sh;
+      if(w>maxSize||h>maxSize){ if(w>h){h=Math.round(h*maxSize/w);w=maxSize;} else {w=Math.round(w*maxSize/h);h=maxSize;} }
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      const ctx=c.getContext('2d'); ctx.imageSmoothingQuality='high'; ctx.drawImage(source,0,0,w,h);
+      return c;
+    };
+    const toBlobQ=(canvas,q)=>new Promise(res=>{ try{ canvas.toBlob(b=>res(b),'image/jpeg',q); }catch(_){ res(null); } });
+    const fromBitmapLike=async(source,sw,sh)=>{
+      const big=drawScaled(source,sw,sh,maxTarget);
+      const previewCanvas = maxTarget===previewMax ? big : drawScaled(big,big.width,big.height,previewMax);
+      const masterCanvas  = maxTarget===masterMax  ? big : drawScaled(big,big.width,big.height,masterMax);
+      const [previewBlob,masterBlob]=await Promise.all([toBlobQ(previewCanvas,previewQ),toBlobQ(masterCanvas,masterQ)]);
+      // Kalau toBlob gagal, JANGAN pakai file mentah (bisa besar & bikin RAM jebol).
+      // Coba turunkan kualitas 1x; kalau masih gagal juga, biarkan null (foto itu skip, dilaporkan gagal ke user).
+      const safePreview = previewBlob || await toBlobQ(previewCanvas, Math.max(0.5, previewQ-0.2));
+      const safeMaster  = masterBlob  || await toBlobQ(masterCanvas,  Math.max(0.5, masterQ-0.2));
+      return {previewBlob:safePreview, masterBlob:safeMaster};
+    };
+    if (typeof createImageBitmap==='function'){
+      return createImageBitmap(file).then(async bmp=>{
+        try{ const out=await fromBitmapLike(bmp,bmp.width,bmp.height); bmp.close&&bmp.close(); return out; }
+        catch(_){ bmp.close&&bmp.close(); return legacyPair_(file,fromBitmapLike); }
+      }).catch(()=>legacyPair_(file,fromBitmapLike));
+    }
+    return legacyPair_(file,fromBitmapLike);
+  }
+  function legacyPair_(file,fromBitmapLike){
+    // Fallback tanpa createImageBitmap: masih 1x decode (blob URL, bukan base64).
+    // JANGAN pernah balikin raw file kalau decode/compress gagal — biar caller
+    // anggap ini GAGAL (foto di-skip + dilaporkan error), bukan diam-diam
+    // nyimpen file mentah yang bisa berat di RAM/storage.
+    return new Promise((resolve)=>{
+      const url=URL.createObjectURL(file);
+      const img=new Image();
+      img.onload=async ()=>{
+        try{ const out=await fromBitmapLike(img,img.naturalWidth||img.width,img.naturalHeight||img.height); URL.revokeObjectURL(url); resolve(out); }
+        catch(_){ URL.revokeObjectURL(url); resolve({previewBlob:null,masterBlob:null}); }
+      };
+      img.onerror=()=>{ URL.revokeObjectURL(url); resolve({previewBlob:null,masterBlob:null}); };
+      img.src=url;
+    });
+  }
+
 
   let logoUnlocked = false;
 
@@ -3418,55 +3451,75 @@ function setupSuperCleanup() {
     async function processSingle(file, label) {
       showOverlay('Memproses foto dari '+label+'...');
       try {
-        const data = await fileToDataURL(file);
-        const comp = await compressDataUrl(data,0.98,4096);
-        await addPhotoToArea(comp,currentTargetArea,file);
+        const ok = await addPhotoToAreaSilent(file,currentTargetArea);
+        if (ok) { persistMeta(); renderAreas(); alert('✅ Foto berhasil ditambahkan ke '+patrolData[currentTargetArea]?.name); }
+        else alert('❌ Gagal menyimpan foto. Pastikan penyimpanan browser tersedia.');
       } catch(err) { console.error(err); alert('❌ Gagal memproses foto: '+(err?.message||err)); }
       finally { hideOverlay(); }
     }
     async function processMany(files) {
       showOverlay('Memproses '+files.length+' foto dari galeri...'); setOverlayProgress(0);
+      const CONCURRENCY = 2; // 2 foto sekaligus: manfaatkan multi-core tanpa membebani memori HP
+      let done=0, ok=0, fail=0;
       try {
-        for(let i=0;i<files.length;i++) {
-          const data=await fileToDataURL(files[i]);
-          const comp=await compressDataUrl(data,0.98,4096);
-          await addPhotoToArea(comp,currentTargetArea,files[i]);
-          setOverlayProgress(Math.round(((i+1)/files.length)*100));
+        let idx=0;
+        async function worker(){
+          while(idx<files.length){
+            const my=idx++;
+            try { (await addPhotoToAreaSilent(files[my],currentTargetArea)) ? ok++ : fail++; }
+            catch(err) { console.error(err); fail++; }
+            done++; setOverlayProgress(Math.round((done/files.length)*100));
+          }
         }
-      } catch(err) { console.error(err); alert('❌ Gagal memproses foto: '+(err?.message||err)); }
-      finally { hideOverlay(); }
+        await Promise.all(Array.from({length:Math.min(CONCURRENCY,files.length)},worker));
+        persistMeta(); renderAreas();
+        alert((fail?'⚠️ ':'✅ ')+ok+' dari '+files.length+' foto berhasil ditambahkan ke '+(patrolData[currentTargetArea]?.name||'area')+(fail?('. '+fail+' gagal.'):'.'));
+      } catch(err) {
+        console.error(err);
+        persistMeta();
+        renderAreas();
+        alert('❌ Batch upload gagal: '+(err?.message||err));
+      } finally { hideOverlay(); }
     }
   }
 
-  async function addPhotoToArea(dataUrl, targetAreaKey, originalFile=null) {
-    if (!patrolData[targetAreaKey]) { alert('❌ Area tidak ditemukan!'); return; }
+  async function addPhotoToAreaSilent(file, targetAreaKey) {
+    if (!patrolData[targetAreaKey]) return false;
     const area=patrolData[targetAreaKey];
     if (!Array.isArray(area.photos)) area.photos=[];
     if (!Array.isArray(area.descriptions)) area.descriptions=[];
     try {
       // DUAL-SOURCE: preview hemat storage + MASTER asli untuk PDF/Word.
+      // Sekarang keduanya dihasilkan dari SATU KALI decode gambar (lihat makePhotoPair_).
+      const {previewBlob, masterBlob} = await makePhotoPair_(file);
+      if (!previewBlob || !masterBlob) return false; // gagal compress total → skip foto, jangan simpan apapun
       if (db) {
-        const previewBlob=await (await fetch(dataUrl)).blob();
         const previewKey='b_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
         await idbPut(STORE_BLOBS,previewKey,previewBlob);
-        await idbPut(STORE_META,previewKey,{name:'patrol-preview.jpg',ts:new Date().toISOString(),type:previewBlob.type,role:'preview'});
+        await idbPut(STORE_META,previewKey,{name:'patrol-preview.jpg',ts:new Date().toISOString(),type:previewBlob.type||'image/jpeg',role:'preview'});
         const masterKey='m_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
-        const masterBlob=await capMasterBlob(originalFile instanceof Blob ? originalFile : previewBlob);
         await idbPut(STORE_BLOBS,masterKey,masterBlob);
-        await idbPut(STORE_META,masterKey,{name:originalFile?.name||'patrol-master',ts:new Date().toISOString(),type:originalFile?.type||masterBlob.type,role:'master'});
+        await idbPut(STORE_META,masterKey,{name:file?.name||'patrol-master',ts:new Date().toISOString(),type:file?.type||masterBlob.type||'image/jpeg',role:'master'});
         area.photos.push({ref:previewKey,masterRef:masterKey});
       } else {
-        area.photos.push(originalFile instanceof Blob ? {blob:originalFile,preview:dataUrl} : dataUrl);
+        area.photos.push({blob:previewBlob,preview:URL.createObjectURL(previewBlob)});
       }
       area.descriptions.push(getAreaDefaultDescription(area));
       if(!Array.isArray(area.descriptionFlags)) area.descriptionFlags=[]; area.descriptionFlags.push(false);
       area.timestamp=Date.now();
-      persistMeta(); renderAreas();
-      alert('✅ Foto berhasil ditambahkan ke '+area.name);
+      return true;
     } catch(err) {
       console.error('[PHOTO STORAGE]',err);
-      alert('❌ Gagal menyimpan foto. Pastikan penyimpanan browser tersedia.');
+      return false;
     }
+  }
+
+  // Wrapper lama tetap ada untuk kompatibilitas jika dipanggil dari tempat lain.
+  async function addPhotoToArea(file, targetAreaKey) {
+    const ok = await addPhotoToAreaSilent(file,targetAreaKey);
+    if (ok) { persistMeta(); renderAreas(); alert('✅ Foto berhasil ditambahkan ke '+patrolData[targetAreaKey]?.name); }
+    else alert('❌ Gagal menyimpan foto. Pastikan penyimpanan browser tersedia.');
+    return ok;
   }
   // Legacy gallery setup removed. Gallery access is controlled only by the Camera tab password.
 
@@ -3549,39 +3602,48 @@ function setupSuperCleanup() {
           const files = Array.from(ev.target.files || []);
           if(!files.length) return;
           showOverlay(`Memproses ${files.length} foto...`); setOverlayProgress(0);
-          const CHUNK = 1; // proses 1 foto per waktu — cegah RAM numpuk pas banyak foto sekaligus
-          let processed = 0;
-          for(let i=0;i<files.length;i+=CHUNK){
-            const chunk = files.slice(i,i+CHUNK);
-            await Promise.all(chunk.map(async (f)=>{
-              try{
-                const data = await fileToDataURL(f);
-                const comp = await compressDataUrl(data, 0.98, 4096);
-                let key = null, masterKey = null;
-                if(db){
-                  try{
-                    const previewBlob = await (await fetch(comp)).blob();
-                    key = 'b_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-                    await idbPut(STORE_BLOBS, key, previewBlob);
-                    await idbPut(STORE_META, key, { name: f.name, ts: new Date().toISOString(), role:'preview' });
-                    masterKey = 'm_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-                    await idbPut(STORE_BLOBS, masterKey, await capMasterBlob(f));
-                    await idbPut(STORE_META, masterKey, { name: f.name, ts: new Date().toISOString(), type:f.type, role:'master' });
-                    patrolData[k].photos.push({ ref:key, masterRef:masterKey });
-                  }catch(e){ patrolData[k].photos.push(comp); }
-                } else { patrolData[k].photos.push({blob:f,preview:comp}); }
-                patrolData[k].descriptions.push(getAreaDefaultDescription(patrolData[k]));
-                if(!Array.isArray(patrolData[k].descriptionFlags)) patrolData[k].descriptionFlags=[]; patrolData[k].descriptionFlags.push(false);
-                persistMeta();
-              }catch(err){ console.warn('file err', err); }
-            }));
-            processed += chunk.length;
-            setOverlayProgress(Math.round((processed/files.length)*100));
-            await new Promise(r=>setTimeout(r,150));
+          const CHUNK = 2;
+          let processed = 0, failed = 0;
+          try {
+            for(let i=0;i<files.length;i+=CHUNK){
+              const chunk = files.slice(i,i+CHUNK);
+              const results = await Promise.all(chunk.map(async f=>{
+                try{
+                  const {previewBlob,masterBlob} = await makePhotoPair_(f);
+                  if (!previewBlob || !masterBlob) return false; // gagal compress total → skip, jangan simpan raw
+                  if(db){
+                    try{
+                      const key = 'b_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+                      await idbPut(STORE_BLOBS, key, previewBlob);
+                      await idbPut(STORE_META, key, { name: f.name, ts: new Date().toISOString(), type:previewBlob.type||'image/jpeg', role:'preview' });
+                      const masterKey = 'm_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+                      await idbPut(STORE_BLOBS, masterKey, masterBlob);
+                      await idbPut(STORE_META, masterKey, { name: f.name, ts: new Date().toISOString(), type:f.type, role:'master' });
+                      patrolData[k].photos.push({ ref:key, masterRef:masterKey });
+                    }catch(e){ patrolData[k].photos.push({blob:previewBlob,preview:URL.createObjectURL(previewBlob)}); }
+                  } else { patrolData[k].photos.push({blob:previewBlob,preview:URL.createObjectURL(previewBlob)}); }
+                  patrolData[k].descriptions.push(getAreaDefaultDescription(patrolData[k]));
+                  if(!Array.isArray(patrolData[k].descriptionFlags)) patrolData[k].descriptionFlags=[];
+                  patrolData[k].descriptionFlags.push(false);
+                  return true;
+                }catch(err){ console.warn('file err', err); return false; }
+              }));
+              processed += chunk.length;
+              failed += results.filter(ok=>!ok).length;
+              setOverlayProgress(Math.round((processed/files.length)*100));
+            }
+            persistMeta();
+            renderAreas();
+            alert('✅ Selesai menambahkan '+files.length+' foto ke '+(patrolData[k]?.name||'area')+'\n'+(failed?'⚠️ Gagal: '+failed+' foto.':'Semua foto berhasil ditambahkan.'));
+          }catch(err){
+            console.error('[AREA GALLERY]',err);
+            persistMeta();
+            renderAreas();
+            alert('❌ Gagal memproses galeri: '+(err?.message||err));
+          }finally{
+            hideOverlay();
+            fileInput.value = '';
           }
-          hideOverlay();
-          fileInput.value = '';
-          renderPhotosForArea(k);
         });
       }
 
@@ -3601,6 +3663,8 @@ function setupSuperCleanup() {
     update23AreaCounter();
   }
 
+  const areaRenderLimit = {}; // per-area: berapa banyak foto yang sudah dirender (untuk "load more" beneran)
+
   async function renderPhotosForArea(k){
     const area = patrolData[k]; 
     if(!area) return;
@@ -3616,9 +3680,13 @@ function setupSuperCleanup() {
     });
     container.innerHTML = '';
     
-    // Virtual scroll untuk performance - limit render
+    // Render bertahap (pagination beneran) - batasi jumlah foto yg di-decode/tampilkan
+    // sekaligus supaya HP gak lag render puluhan foto sekaligus, tapi "load more"
+    // beneran nambah, bukan cuma nge-alert.
     const photos = area.photos || [];
-    const visiblePhotos = photos.slice(0, 50); // Render maksimal 50 foto sekaligus
+    if (areaRenderLimit[k] === undefined) areaRenderLimit[k] = 50;
+    const limit = areaRenderLimit[k];
+    const visiblePhotos = photos.slice(0, limit);
     
     for(let i = 0; i < visiblePhotos.length; i++){
         const p = photos[i];
@@ -3668,7 +3736,8 @@ function setupSuperCleanup() {
         loadMore.style.cssText = 'width:100%; padding:12px; text-align:center; background:#f1f5f9; border-radius:8px; margin-top:8px; cursor:pointer; font-weight:600; color:#64748b;';
         loadMore.innerHTML = `📁 Load ${photos.length - visiblePhotos.length} foto lagi...`;
         loadMore.addEventListener('click', () => {
-            alert('Untuk performance, hanya menampilkan 50 foto pertama. Hapus beberapa foto lama untuk melihat yang baru.');
+            areaRenderLimit[k] = limit + 50; // beneran nambah render, bukan cuma alert
+            renderPhotosForArea(k);
         });
         container.appendChild(loadMore);
     }
@@ -4436,14 +4505,7 @@ document.getElementById('manualCleanupBtn')?.addEventListener('click', () => {
   alert('🧹 Memory cleanup completed! Browser should be more stable now.');
 });
 
-// JANGAN GANGGU BAGIAN INI ↓
-document.getElementById('compressBtn')?.addEventListener('click', async ()=>{
-  // ... kode compress ...
-});
-
-document.getElementById('backupBtn')?.addEventListener('click', async ()=>{
-  // ... kode backup ...
-});
+// (stub kosong duplikat untuk compressBtn/backupBtn sudah dihapus — hanya 1 listener aktif per tombol di bawah)
   document.getElementById('compressBtn')?.addEventListener('click', async ()=>{
     showOverlay('Mengompres semua foto dengan kualitas terjaga...'); 
     setOverlayProgress(0);
