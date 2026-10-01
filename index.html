@@ -1919,7 +1919,7 @@ const DEFAULT_LOGO_LEFT_URL = DEFAULT_LOGO_URL;
 const DEFAULT_LOGO_RIGHT_URL = DEFAULT_LOGO_URL;
 // ===== GAS CONFIG — GANTI URL GAS DI SINI SAJA =====
 // Semua fungsi backend (ADMIN, PDF upload, Finding Central) memakai URL ini.
-const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbx444U3NRZZ6uMAQAsroavrGUF3a_wp7XwreNWlf5EwXZiMJtKnlELfOwu9UbRJFyn4GA/exec"],CREATED_BY="Mbah Pri";
+const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbxgzkEQkhtx2ELeC7VfqV2KTlyXB7Z2i6ReKil9NmeHrrsiJr2h7bxNg5gUICOQBJfJog/exec"],CREATED_BY="Mbah Pri";
 const ADMIN_AUTH_ENDPOINT = GAS_API_ENDPOINTS[0];
 const PDF_UPLOAD_URL = GAS_API_ENDPOINTS[0];
 const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
@@ -1998,6 +1998,9 @@ function getAreaTemplateForPatrol(area){
   return null;
 }
 function getAreaDefaultDescription(area){
+  if(area && area.customArea && Array.isArray(area.customChecks) && area.customChecks.length){
+    return area.customChecks.map((x,i)=>`${i+1}. ${String(x).toUpperCase()}`).join('\n');
+  }
   const t=getAreaTemplateForPatrol(area);
   if(!t) return DEFAULT_PATROL_DESCRIPTION;
   if(typeof t.descriptionTemplate==='string' && t.descriptionTemplate.trim()) return t.descriptionTemplate.trim().toUpperCase();
@@ -3438,8 +3441,15 @@ function setupSuperCleanup() {
 
     targetAreaSelect?.addEventListener('change', e => { currentTargetArea = e.target.value; });
 
-    // Area tidak lagi ditambahkan otomatis/berurutan. Tombol hanya membuka picker 23 area.
-    document.getElementById('addAreaCameraBtn')?.addEventListener('click', () => { open23AreaPicker(); });
+    // Flow PATROLI: klik tombol -> pilih AREA A/B -> baru pilih titik/template.
+    document.getElementById('addAreaCameraBtn')?.addEventListener('click', () => {
+      const token=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
+      const allowedRaw=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
+      const assigned=allowedRaw.split(',').map(x=>String(x).trim().toUpperCase()).filter(x=>x==='AREA_A'||x==='AREA_B');
+      const isAdmin=String(localStorage.getItem('STT_USER_AREA_V1')||'').toUpperCase()==='ALL' || !!window.adminUnlocked || !!window.adminBypass;
+      if(typeof window.STT_OPEN_AREA_SELECTOR==='function') window.STT_OPEN_AREA_SELECTOR({is_admin:isAdmin,area_ids:isAdmin?['AREA_A','AREA_B']:assigned,user_token:token,openPointPicker:true});
+      else open23AreaPicker();
+    });
 
     const pickerClose=document.getElementById('stt23PickerClose');
     pickerClose?.addEventListener('click',close23AreaPicker);
@@ -3981,11 +3991,12 @@ function setupSuperCleanup() {
         const r=await fetch(central,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'SAVE_AREA_TEMPLATE',area_id:active,name:name,checks:JSON.stringify(checks),user_token:token}).toString(),cache:'no-store'});
         const j=await sttReadJson(r); if(!j||j.ok===false)throw new Error(j?.message||j?.error||'Gagal menyimpan template custom.');
         await loadBackendCustomTemplates_(active,true);
-        // Custom template is saved to backend first; then it is selected as a patrol point.
-        const id=nextAreaId(); patrolData[id]={name:String(j.name||name).toUpperCase(),templateId:String(j.template_id),templateOrder:null,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now(),customArea:true,customChecks:Array.isArray(j.checks)?j.checks.slice():checks.slice()};
-        persistMeta();renderAreas();updateAreaSelector();currentTargetArea=String(id);const selector=document.getElementById('targetAreaSelect');if(selector)selector.value=currentTargetArea;update23AreaCounter();
-        close23AreaPicker();
-        alert('✅ CUSTOM AREA TERSIMPAN DI BACKEND DAN DITAMBAHKAN KE '+active+'.');
+        // CUSTOM = save template only. Do NOT add it to the active patrol yet.
+        // The user must explicitly select the new point from the picker.
+        if(nameEl)nameEl.value='';
+        if(checksEl)checksEl.value='';
+        await render23AreaPicker('');
+        alert('✅ TEMPLATE CUSTOM TERSIMPAN DI BACKEND. Pilih titik tersebut jika ingin memasukkannya ke sesi patroli.');
         return true;
       }catch(e){alert('❌ '+(e?.message||e));return false;}
       finally{if(btn){btn.disabled=false;btn.textContent='➕ BUAT CUSTOM AREA';}}
@@ -5147,8 +5158,8 @@ renderAreas();
       if(!adminSessionToken)throw new Error('Backend tidak mengembalikan sesi ADMIN.');
       try{localStorage.setItem('STT_USER_TOKEN_V1',adminSessionToken);localStorage.setItem('STT_USER_AREA_V1','ALL')}catch(e){}
       setAdminBypass(true);
-      if(typeof window.STT_OPEN_AREA_SELECTOR==='function') window.STT_OPEN_AREA_SELECTOR({is_admin:true,area_id:'ALL',area_ids:['AREA_A','AREA_B'],user_token:adminSessionToken});
-      else apply('allowed');
+      try{localStorage.setItem('STT_ALLOWED_AREAS_V1','AREA_A,AREA_B');localStorage.removeItem('STT_ACTIVE_AREA_V1');}catch(e){}
+      apply('allowed');
       try{setAdminUi(true)}catch(e){}
       alert('✅ ADMIN aktif. Sekarang buat akun ADMIN kamu sendiri di panel USER ACCESS CONTROL supaya tidak perlu pakai kunci ini lagi.');
     }catch(e){setMsg('❌ '+(e.message||'Kunci ADMIN salah.'));}
@@ -5214,9 +5225,10 @@ renderAreas();
         try{if(j.user_token)localStorage.setItem('STT_USER_TOKEN_V1',String(j.user_token));}catch(e){}
         try{if(j.area_id)localStorage.setItem('STT_USER_AREA_V1',String(j.area_id));}catch(e){}
         if(j.is_admin)setAdminBypass(true);
-        if(typeof window.STT_OPEN_AREA_SELECTOR==='function'){
-          window.STT_OPEN_AREA_SELECTOR({is_admin:!!j.is_admin,area_id:j.area_id,area_ids:j.area_ids,user_token:j.user_token});
-        }else apply('allowed');
+        try{localStorage.setItem('STT_ALLOWED_AREAS_V1',Array.isArray(j.area_ids)?j.area_ids.join(','):String(j.area_ids||j.area_id||''));}
+        catch(e){}
+        try{localStorage.removeItem('STT_ACTIVE_AREA_V1');}catch(e){}
+        apply('allowed');
       }else{
         const m=(j&&(j.message||j.error))||'Login gagal.';
         if(msgEl)msgEl.textContent='❌ '+(m==='USER_BLOCKED'?'Akun ini diblokir ADMIN.':m==='INVALID_PASSWORD'?'Password salah.':m==='USER_NOT_FOUND'?'Username belum terdaftar. Hubungi ADMIN.':m);
@@ -5243,11 +5255,8 @@ renderAreas();
     // Open the area selector immediately; the selected area is still server-validated before entry.
     if(savedToken && allowedRaw){
       const assigned=allowedRaw.split(',').filter(Boolean);
-      if(!active && assigned.length){
-        if(typeof window.STT_OPEN_AREA_SELECTOR==='function')window.STT_OPEN_AREA_SELECTOR({is_admin:false,area_ids:assigned,user_token:savedToken});
-        else apply('allowed');
-        return;
-      }
+      // A saved session is enough to unlock the app. Area selection belongs to the Patrol feature, not login.
+      if(!active && assigned.length){ apply('allowed'); return; }
       if(active && (active==='AREA_A'||active==='AREA_B')){
         checking=true;
         try{
@@ -5268,7 +5277,7 @@ renderAreas();
         try{if(j.area_ids)localStorage.setItem('STT_ALLOWED_AREAS_V1',Array.isArray(j.area_ids)?j.area_ids.join(','):String(j.area_ids));}catch(e){}
         try{localStorage.removeItem('STT_ACTIVE_AREA_V1')}catch(e){}
         if(j.area_id)try{localStorage.setItem('STT_USER_AREA_V1',String(j.area_id))}catch(e){}
-        if(typeof window.STT_OPEN_AREA_SELECTOR==='function')window.STT_OPEN_AREA_SELECTOR({is_admin:!!j.is_admin,area_id:j.area_id,area_ids:j.area_ids,user_token:j.user_token});else apply('allowed');
+        apply('allowed');
       }else if(j&&String(j.message||j.error||'')==='USER_BLOCKED'){apply('blocked');}
       else{clearCreds();apply('guest');}
     }catch(e){if(status!=='allowed')apply(status);const m=document.getElementById('ugMsg');if(m)m.textContent='CENTRAL belum dapat dihubungi. Coba lagi.';}
@@ -5726,7 +5735,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V26 AREA-B-FIX ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V27 FINAL PATROL FLOW FIX ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5738,7 +5747,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #sttAreaBadgeV15{display:inline-flex;align-items:center;gap:7px;margin-left:10px;padding:5px 10px;border-radius:999px;background:#eaf2ff;color:#164e8a;font-size:11px;font-weight:900}
 @media(max-width:560px){#sttAreaGateV15 .stt-area-grid{grid-template-columns:1fr}#sttAreaGateV15 .stt-area-btn.all{grid-column:auto}}
 </style>
-<script id="STT_MULTI_AREA_ACCESS_V21">
+<script id="STT_MULTI_AREA_ACCESS_V27">
 (function(){'use strict';
 const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',P:'STT_ALLOWED_AREAS_V1',M:'patrol_meta_v1'}, AREAS=['AREA_A','AREA_B'];
 const n=v=>{const s=String(v??'').trim().toUpperCase().replace(/[\s-]+/g,'_');return s==='ALL'?'ALL':(AREAS.includes(s)?s:'')};
@@ -5765,14 +5774,14 @@ function openSelector(info){
   const all=admin?'<button class="stt-area-btn all" data-a="ALL">🌐 ALL AREA — ADMIN</button>':'';
   d.innerHTML='<div class="stt-area-card"><h2>📍 PILIH AREA KERJA</h2><p>Pilih area yang akan digunakan untuk sesi patroli ini. User yang memiliki akses lebih dari satu area dapat berpindah Area A ↔ Area B kapan saja.</p><div class="stt-area-grid">'+buttons+all+'</div></div>';
   document.body.appendChild(d);
-  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{const a=n(b.dataset.a);if(!a)return;d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';const vr=await validateArea(a);if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+a.replace('_',' ');showAreaError(d,'❌ '+vr.message);return;}set(K.A,a);if(a!=='ALL')swap(a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){}d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)};setTimeout(()=>{try{if(typeof open23AreaPicker==='function')open23AreaPicker()}catch(e){console.warn('[POINT PICKER]',e)}},120)});
+  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{const a=n(b.dataset.a);if(!a)return;d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';const vr=await validateArea(a);if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+a.replace('_',' ');showAreaError(d,'❌ '+vr.message);return;}set(K.A,a);if(a!=='ALL')swap(a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){}d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)};if(info?.openPointPicker){setTimeout(()=>{try{if(typeof open23AreaPicker==='function')open23AreaPicker()}catch(e){console.warn('[POINT PICKER]',e)}},120)}});
 }
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const a=allowed();const isAdmin=ua()==='ALL';if(!isAdmin&&!a.length)return;openSelector({is_admin:isAdmin,area_id:a[0]||'ALL',area_ids:isAdmin?AREAS:a,user_token:get(K.T)})}
 function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!aa())return;let b=document.getElementById('sttAreaBadgeV15');if(!b){b=document.createElement('span');b.id='sttAreaBadgeV15';t.appendChild(b)}b.textContent=aa()==='ALL'?'ALL AREA':aa().replace('_',' ')}catch(e){}}
-const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V26){window.__STT_MULTI_AREA_FETCH_V26=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
+const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V27){window.__STT_MULTI_AREA_FETCH_V27=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
 function clear(){del(K.T);del(K.U);del(K.A);del(K.P);del('STT_ADMIN_BYPASS_V1')}
 function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){const old=window.STT_USER_ACCESS.logout;window.STT_USER_ACCESS.logout=function(){clear();if(typeof old==='function')old()};window.STT_USER_ACCESS.__MA=1}}catch(e){}}
-function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&!aa())gate();else if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
+function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
 function adminCrud(){const box=document.getElementById('sttUserAccessManager');if(!box||box.dataset.ma==='1')return;box.dataset.ma='1';const d=document.createElement('div');d.style.cssText='margin-top:14px;padding:14px;border:2px solid #dbe5f0;border-radius:14px;background:#fbfdff';d.innerHTML='<div style="font-weight:900;color:#0b3d91;margin-bottom:10px">USER MANAGEMENT • MULTI AREA</div><div class="small">User yang sama dapat diberi akses Area A, Area B, atau keduanya.</div>';box.appendChild(d)}
 document.addEventListener('DOMContentLoaded',()=>setTimeout(install,500));setInterval(install,2000);
 window.STT_OPEN_AREA_SELECTOR=openSelector;
