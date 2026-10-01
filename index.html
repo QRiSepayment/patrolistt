@@ -1667,8 +1667,8 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
           <button id="addAreaCameraBtn" class="btn btn-ghost stt23-add-btn" type="button">
             <i class="fas fa-map-marked-alt"></i> PILIH AREA PATROLI
           </button>
-          <div id="stt23AreaCounter" class="stt23-counter">0 / 23 TITIK AREA TERPASANG</div>
-          <div class="small" style="margin-top:8px">Pilih sendiri area yang akan dipatroli. <strong>Tidak ada urutan otomatis</strong>, sehingga petugas dapat menentukan urutan patroli secara fleksibel. Nama area dan checklist terisi otomatis. <strong>FINDING NOTES dikelola di halaman terpisah</strong> agar area patroli tetap sederhana.</div>
+          <div id="stt23AreaCounter" class="stt23-counter">0 TITIK AREA TERPASANG</div>
+          <div class="small" style="margin-top:8px">Pilih area yang akan dipatroli. Template bawaan hanya sebagai pilihan awal. <strong>Custom Area tidak dibatasi jumlahnya</strong> dan nama area dapat dibuat sesuai kebutuhan lapangan. <strong>FINDING NOTES dikelola di halaman terpisah</strong>.</div>
         </div>
 
         <!-- PICKER 23 AREA: petugas memilih area secara manual, tidak otomatis berurutan -->
@@ -1682,8 +1682,15 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
               <button type="button" id="stt23PickerClose" class="btn btn-ghost stt23-picker-close">✕</button>
             </div>
             <div class="stt23-picker-tools">
-              <input id="stt23PickerSearch" type="search" placeholder="CARI NAMA AREA..." autocomplete="off" />
-              <button type="button" id="stt23PickerRandom" class="btn btn-ghost">🎲 ACAK AREA TERSEDIA</button>
+              <input id="stt23PickerSearch" type="search" placeholder="CARI TEMPLATE / AREA..." autocomplete="off" />
+              <button type="button" id="stt23PickerRandom" class="btn btn-ghost">🎲 ACAK TEMPLATE</button>
+            </div>
+            <div class="stt-custom-area-box" style="margin:12px 0;padding:14px;border:2px solid #bfdbfe;border-radius:14px;background:#eff6ff">
+              <div style="font-weight:900;color:#164e8a;margin-bottom:8px">➕ CUSTOM AREA — TANPA BATAS</div>
+              <input id="sttCustomAreaName" type="text" maxlength="120" placeholder="Nama area sesuai kebutuhan, contoh: PARKIR TIMUR, ROOFTOP 2, GATE 7..." autocomplete="off" style="width:100%;box-sizing:border-box;padding:12px;border:2px solid #cbd5e1;border-radius:10px;margin-bottom:8px">
+              <textarea id="sttCustomAreaChecks" rows="3" placeholder="Checklist opsional — satu titik per baris. Boleh dikosongkan." style="width:100%;box-sizing:border-box;padding:12px;border:2px solid #cbd5e1;border-radius:10px;resize:vertical"></textarea>
+              <button type="button" id="sttCustomAreaAddBtn" class="btn btn-primary" style="width:100%;margin-top:8px">➕ BUAT CUSTOM AREA</button>
+              <div class="small" style="margin-top:7px;color:#475569">Tidak ada batas jumlah custom area. Area yang dibuat tersimpan pada Area Kerja aktif.</div>
             </div>
             <div id="stt23PickerList" class="stt23-picker-list"></div>
           </div>
@@ -2819,6 +2826,10 @@ function setupSuperCleanup() {
       // Keep localStorage only for small metadata. Photos are already handled
       // separately; if quota is exhausted, do not crash the application.
       localStorage.setItem('patrol_meta_v1', payload);
+      try{
+        const active=(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').trim().toUpperCase();
+        if(active==='AREA_A'||active==='AREA_B') localStorage.setItem('patrol_meta_v1_'+active,payload);
+      }catch(_){}
       return true;
     }catch(err){
       console.warn('[Patrolistt] localStorage quota/error:', err);
@@ -3317,7 +3328,7 @@ function setupSuperCleanup() {
   function updateAreaSelector() {
     const areaSelector = document.getElementById('areaSelector');
     const targetAreaSelect = document.getElementById('targetAreaSelect');
-    const areaKeys = Object.keys(patrolData || {}).sort((a,b)=>Number(a)-Number(b));
+    const areaKeys = Object.keys(patrolData || {}).sort((a,b)=>{const na=Number(a),nb=Number(b);return (Number.isFinite(na)?na:1e12)-(Number.isFinite(nb)?nb:1e12)});
     
     if (areaKeys.length > 0) {
       areaSelector.style.display = 'block';
@@ -3335,7 +3346,7 @@ function setupSuperCleanup() {
         }
         const option = document.createElement('option');
         option.value = key;
-        option.textContent = `Area ${Number(key)+1} — ${displayName}`;
+        option.textContent = `Area ${Number.isFinite(Number(key)) ? Number(key)+1 : ''}${Number.isFinite(Number(key))?' — ':''}${displayName}`;
         targetAreaSelect.appendChild(option);
       });
       try { if (typeof persistMeta === 'function') persistMeta(); } catch(_) {}
@@ -3524,6 +3535,21 @@ function setupSuperCleanup() {
   // Legacy gallery setup removed. Gallery access is controlled only by the Camera tab password.
 
   // ==================== RENDER AREAS UI ====================
+  // Custom area renderer: custom areas use their own optional checklist and never inherit another area's template.
+  if(window.STT_AREA_TEMPLATE_RENDER && !window.__STT_CUSTOM_TEMPLATE_WRAP_V18){
+    const __sttBaseTemplateRender=window.STT_AREA_TEMPLATE_RENDER;
+    window.STT_AREA_TEMPLATE_RENDER=function(a){
+      if(a && a.customArea){
+        const checks=Array.isArray(a.customChecks)?a.customChecks:[];
+        if(!checks.length)return '<div class="small" style="margin-bottom:8px;color:#64748b">Custom area tanpa checklist khusus. Tambahkan titik pemeriksaan melalui Catatan Area atau edit konfigurasi custom.</div>';
+        const items=checks.map((x,i)=>`${i+1}. ${String(x).toUpperCase()}`).join('\n');
+        return `<div style="margin-bottom:8px"><div class="small" style="font-weight:900;color:#164e8a">CHECKLIST CUSTOM</div><div class="small" style="white-space:pre-line;padding:10px;background:#f8fafc;border-radius:10px">${items.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}</div></div>`;
+      }
+      return __sttBaseTemplateRender(a);
+    };
+    window.__STT_CUSTOM_TEMPLATE_WRAP_V18=1;
+  }
+
   function renderAreas(){
     const container = document.getElementById('areas'); container.innerHTML='';
     const keys = Object.keys(patrolData);
@@ -3821,7 +3847,7 @@ function setupSuperCleanup() {
 }
 
   // ==================== AREA MANAGEMENT ====================
-    // ==================== 23 AREA PICKER — PILIH MANUAL, TANPA URUTAN OTOMATIS ====================
+    // ==================== AREA PICKER — TEMPLATE + CUSTOM TANPA BATAS ====================
     function getUsed23TemplateIds(){
       return new Set(Object.values(patrolData || {}).map(a=>String(a?.templateId||'')).filter(Boolean));
     }
@@ -3838,60 +3864,96 @@ function setupSuperCleanup() {
       const used=getUsed23TemplateIds();
       const q=String(filter||'').trim().toUpperCase();
       const visible=templates.filter(t=>!q||String(t.name).toUpperCase().includes(q)||String(t.order).includes(q));
-      const done=used.size; const remaining=Math.max(0,templates.length-done);
-      if(!visible.length){list.innerHTML='<div class="stt23-picker-summary"><span class="done">✓ '+done+' SUDAH DIPILIH</span><span>□ '+remaining+' BELUM DIPILIH</span></div><div class="stt23-picker-empty">AREA YANG DICARI TIDAK DITEMUKAN.</div>';return;}
-      list.innerHTML='<div class="stt23-picker-summary"><span class="done">✓ '+done+' SUDAH DIPILIH</span><span>□ '+remaining+' BELUM DIPILIH</span></div>'+visible.map(t=>{
-        const isUsed=used.has(String(t.id));
-        return `<button type="button" class="stt23-picker-item" data-template-id="${String(t.id).replace(/"/g,'&quot;')}" data-used="${isUsed?'true':'false'}" ${isUsed?'disabled':''}>
-          <span class="stt23-picker-check" aria-label="${isUsed?'Sudah dipilih':'Belum dipilih'}">${isUsed?'✓':'□'}</span>
-          <span class="stt23-picker-num">${t.order}</span>
-          <span class="stt23-picker-name">${String(t.name).toUpperCase()}</span>
-          ${isUsed?'<span class="stt23-picker-badge">SUDAH DIPILIH</span>':'<span class="stt23-picker-badge" style="color:#164e8a;background:#eaf2ff">BELUM DIPILIH</span>'}
-        </button>`;
-      }).join('');
+      const customCount=Object.values(patrolData||{}).filter(a=>String(a?.templateId||'').startsWith('CUSTOM_')).length;
+      const totalCount=Object.keys(patrolData||{}).length;
+      let html='<div class="stt23-picker-summary"><span class="done">✓ '+totalCount+' AREA TERPASANG</span><span>Custom: '+customCount+'</span></div>';
+      if(!visible.length){
+        html+='<div class="stt23-picker-empty">TEMPLATE TIDAK DITEMUKAN. GUNAKAN FORM CUSTOM AREA DI ATAS.</div>';
+      }else{
+        html+=visible.map(t=>{
+          const isUsed=used.has(String(t.id));
+          return `<button type="button" class="stt23-picker-item" data-template-id="${String(t.id).replace(/"/g,'&quot;')}" data-used="${isUsed?'true':'false'}" ${isUsed?'disabled':''}>
+            <span class="stt23-picker-check" aria-label="${isUsed?'Sudah dipilih':'Belum dipilih'}">${isUsed?'✓':'□'}</span>
+            <span class="stt23-picker-num">${t.order}</span>
+            <span class="stt23-picker-name">${String(t.name).toUpperCase()}</span>
+            ${isUsed?'<span class="stt23-picker-badge">SUDAH DIPILIH</span>':'<span class="stt23-picker-badge" style="color:#164e8a;background:#eaf2ff">TEMPLATE</span>'}
+          </button>`;
+        }).join('');
+      }
+      list.innerHTML=html;
       list.querySelectorAll('.stt23-picker-item:not(:disabled)').forEach(btn=>{
         btn.addEventListener('click',()=>{addNewArea(btn.dataset.templateId);});
       });
     }
 
     function open23AreaPicker(){
-      const templates=window.STT_FIXED_23_AREA_TEMPLATES||[];
-      const used=getUsed23TemplateIds();
-      if(templates.length && used.size>=templates.length){alert('ℹ️ SEMUA 23 AREA SUDAH DIBUAT.');return false;}
       const modal=document.getElementById('stt23AreaPicker');
       if(!modal)return false;
       const search=document.getElementById('stt23PickerSearch');
+      const name=document.getElementById('sttCustomAreaName');
+      const checks=document.getElementById('sttCustomAreaChecks');
       if(search)search.value='';
+      if(name)name.value='';
+      if(checks)checks.value='';
       render23AreaPicker('');
       modal.classList.add('open');modal.setAttribute('aria-hidden','false');
-      setTimeout(()=>search?.focus(),80);
+      setTimeout(()=>name?.focus(),80);
+      return true;
+    }
+
+    function nextAreaId(){
+      const keys=Object.keys(patrolData||{}).map(k=>parseInt(k,10)).filter(Number.isFinite);
+      return keys.length?Math.max(...keys)+1:0;
+    }
+
+    function addCustomArea(){
+      const nameEl=document.getElementById('sttCustomAreaName');
+      const checksEl=document.getElementById('sttCustomAreaChecks');
+      const name=String(nameEl?.value||'').trim().replace(/\s+/g,' ');
+      if(!name){alert('⚠️ Masukkan nama custom area terlebih dahulu.');nameEl?.focus();return false;}
+      const checks=String(checksEl?.value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+      const id=nextAreaId();
+      const customId='CUSTOM_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+      patrolData[id]={name:name.toUpperCase(),templateId:customId,templateOrder:null,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now(),customArea:true,customChecks:checks};
+      persistMeta();renderAreas();try{window.dispatchEvent(new Event('stt-patrol-data-changed'));}catch(_){}
+      currentTargetArea=String(id);updateAreaSelector();
+      const selector=document.getElementById('targetAreaSelect');if(selector)selector.value=currentTargetArea;
+      update23AreaCounter();
+      close23AreaPicker();
+      alert(`✅ CUSTOM AREA DIBUAT: ${name.toUpperCase()}\n\nJumlah area tidak dibatasi.`);
       return true;
     }
 
     function addNewArea(templateId){
-      if(!templateId){return open23AreaPicker();}
+      if(!templateId)return open23AreaPicker();
       const templates=window.STT_FIXED_23_AREA_TEMPLATES || [];
       const template=templates.find(t=>String(t.id)===String(templateId));
       if(!template)return false;
       const used=getUsed23TemplateIds();
       if(used.has(String(template.id))){alert('ℹ️ AREA INI SUDAH DIBUAT. SILAKAN PILIH AREA LAIN.');return false;}
-      const numericKeys=Object.keys(patrolData||{}).map(k=>parseInt(k,10)).filter(Number.isFinite);
-      const id=numericKeys.length?Math.max(...numericKeys)+1:0;
-      patrolData[id]={name:String(template.name).toUpperCase(),templateId:template.id,templateOrder:template.order,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now()};
+      const id=nextAreaId();
+      patrolData[id]={name:String(template.name).toUpperCase(),templateId:template.id,templateOrder:template.order,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now(),customArea:false,customChecks:Array.isArray(template.checks)?template.checks.slice():[]};
       persistMeta();renderAreas();try{window.dispatchEvent(new Event('stt-patrol-data-changed'));}catch(_){}
       currentTargetArea=String(id);updateAreaSelector();
       const selector=document.getElementById('targetAreaSelect');if(selector)selector.value=currentTargetArea;
       update23AreaCounter();close23AreaPicker();
-      alert(`✅ AREA ${template.order}/23 — ${String(template.name).toUpperCase()} DIBUAT.\n\nCHECKLIST PATROLI TERISI OTOMATIS.\nFINDING NOTES DILAKUKAN DI HALAMAN FINDING NOTES.`);
+      alert(`✅ AREA ${template.order} — ${String(template.name).toUpperCase()} DIBUAT.`);
       return true;
     }
 
     function update23AreaCounter(){
-      const templates=window.STT_FIXED_23_AREA_TEMPLATES||[]; const used=getUsed23TemplateIds();
-      const n=Math.min(used.size,templates.length); const el=document.getElementById('stt23AreaCounter'); const btn=document.getElementById('addAreaCameraBtn');
-      if(el)el.textContent=`${n} / ${templates.length||23} TITIK AREA TERPASANG`;
-      if(btn){const done=templates.length>0&&n>=templates.length;btn.disabled=done;btn.innerHTML=done?'<i class="fas fa-circle-check"></i> 23 AREA SUDAH LENGKAP':'<i class="fas fa-map-marked-alt"></i> PILIH AREA PATROLI';}
+      const n=Object.keys(patrolData||{}).length;
+      const el=document.getElementById('stt23AreaCounter');
+      const btn=document.getElementById('addAreaCameraBtn');
+      if(el)el.textContent=`${n} TITIK AREA TERPASANG`;
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-map-marked-alt"></i> PILIH AREA PATROLI';}
     }
+
+    document.getElementById('sttCustomAreaAddBtn')?.addEventListener('click',addCustomArea);
+    document.getElementById('sttPickerCustomAreaAddBtn')?.addEventListener('click',addCustomArea);
+    document.getElementById('stt23PickerSearch')?.addEventListener('input',e=>render23AreaPicker(e.target.value));
+    document.getElementById('stt23PickerClose')?.addEventListener('click',close23AreaPicker);
+    document.getElementById('stt23AreaPicker')?.addEventListener('click',e=>{if(e.target?.id==='stt23AreaPicker')close23AreaPicker();});
 
   // ==================== CLEAN-UP SYSTEM ====================
   function setupAutoCleanup() {
@@ -5469,14 +5531,14 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #sttAreaBadgeV15{display:inline-flex;align-items:center;gap:7px;margin-left:10px;padding:5px 10px;border-radius:999px;background:#eaf2ff;color:#164e8a;font-size:11px;font-weight:900}
 @media(max-width:560px){#sttAreaGateV15 .stt-area-grid{grid-template-columns:1fr}#sttAreaGateV15 .stt-area-btn.all{grid-column:auto}}
 </style>
-<script id="STT_MULTI_AREA_ACCESS_V17">
+<script id="STT_MULTI_AREA_ACCESS_V18">
 (function(){'use strict';
 const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',M:'patrol_meta_v1'}, AREAS=['AREA_A','AREA_B'];
 const n=v=>{const s=String(v??'').trim().toUpperCase().replace(/[\s-]+/g,'_');return s==='ALL'?'ALL':(AREAS.includes(s)?s:'')};
 const bool=v=>v===true||v===1||['true','1','yes'].includes(String(v??'').trim().toLowerCase());
 const get=k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set=(k,v)=>{try{localStorage.setItem(k,String(v))}catch(e){}},del=k=>{try{localStorage.removeItem(k)}catch(e){}};
 const ua=()=>n(get(K.U)),aa=()=>n(get(K.A));
-function swap(a){a=n(a);if(!a)return;try{const old=localStorage.getItem(K.M),sc=localStorage.getItem(K.M+'_'+a);if(old&&!sc)localStorage.setItem(K.M+'_'+a,old);const x=localStorage.getItem(K.M+'_'+a);if(x!==null)localStorage.setItem(K.M,x);else localStorage.removeItem(K.M)}catch(e){console.warn('[AREA SWAP]',e)}}
+function swap(a){a=n(a);if(!a)return;try{let sc=localStorage.getItem(K.M+'_'+a);if(sc===null&&a==='AREA_A'){const legacy=localStorage.getItem(K.M);if(legacy!==null){localStorage.setItem(K.M+'_'+a,legacy);sc=legacy}}if(sc!==null){localStorage.setItem(K.M,sc)}else{localStorage.removeItem(K.M)}}catch(e){console.warn('[AREA SWAP]',e)}}
 function needsSelector(info){const admin=bool(info?.is_admin);const assigned=n(info?.area_id);const active=aa();if(admin)return !active;return !assigned||active!==assigned}
 function showAreaError(d,msg){try{let e=document.getElementById('sttAreaGateMsg');if(!e){e=document.createElement('div');e.id='sttAreaGateMsg';e.style.cssText='margin-top:12px;padding:10px;border-radius:10px;background:#fff1f2;color:#b42318;font-weight:800;font-size:13px';d.querySelector('.stt-area-card')?.appendChild(e)}e.textContent=msg}catch(_){} }
 async function validateArea(a){
