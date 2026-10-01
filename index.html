@@ -1271,6 +1271,7 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 .stt23-complete{margin-top:10px;padding:11px 13px;border-radius:12px;background:#f0fdf4;color:#166534;font-weight:800;font-size:13px}
 .stt23-authority{background:#eff6ff!important;color:#1e3a8a!important;border-left:5px solid #2563eb}.stt23-auto-caption{background:#f8fafc!important;color:#0f172a!important;border:1px solid #dbeafe}.stt-photo-desc.is-finding{border:3px solid #dc2626!important;background:#fee2e2!important;color:#991b1b!important;font-weight:900!important;font-size:20px!important}.stt23-picker-item{position:relative}.stt23-picker-check{width:34px;height:34px;border-radius:10px;border:2px solid #94a3b8;display:inline-flex;align-items:center;justify-content:center;background:#fff;font-size:21px;font-weight:950;flex:0 0 34px}.stt23-picker-item[data-used="true"] .stt23-picker-check{border-color:#16a34a;background:#dcfce7;color:#166534}.stt23-picker-item[data-used="false"] .stt23-picker-check{color:#64748b}.stt23-picker-badge{white-space:nowrap}.stt23-picker-item:disabled{opacity:.9;cursor:default}.stt23-picker-summary{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.stt23-picker-summary span{padding:7px 10px;border-radius:999px;font-size:12px;font-weight:900;background:#f1f5f9;color:#334155}.stt23-picker-summary .done{background:#dcfce7;color:#166534}@media(max-width:680px){.stt23-add-btn{font-size:16px!important}.stt23-template{padding:13px}.stt23-checks{font-size:13px}}
 </style>
+<meta name="stt-build" content="V22-2026-10-01-JSON-MULTIAREA-FIX">
 </head>
 <body>
 
@@ -1926,6 +1927,23 @@ const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
 const GOOGLE_DRIVE_FOLDER_ID = "1G28FlBrRC81QRAUQpQB1L1HUssxiYL8N";
 
 
+// ===== STT V22 RESPONSE + MULTI-AREA HARDENING =====
+async function sttReadJson(response, context='CENTRAL'){
+  const text=await response.text();
+  const raw=String(text||'').trim();
+  if(!raw){
+    throw new Error(context+' mengembalikan respons kosong (HTTP '+response.status+').');
+  }
+  try{
+    return JSON.parse(raw);
+  }catch(e){
+    if(/^<!doctype html/i.test(raw)||/^<html[\s>]/i.test(raw)){
+      throw new Error(context+' mengembalikan HTML, bukan JSON. Pastikan deployment Google Apps Script sudah memakai versi terbaru dan akses Web App = Anyone.');
+    }
+    throw new Error(context+' mengembalikan data bukan JSON (HTTP '+response.status+').');
+  }
+}
+
 const DEFAULT_PATROL_DESCRIPTION = 'Kegiatan patroli area tersebut telah selesai dilaksanakan dengan hasil situasi terpantau terkendali aman dan kondusif, temuan menonjol serta kendala operasional nihil';
 
 // DEFAULT CAPTION PER AREA: jika petugas tidak menulis keterangan foto, gunakan template area yang sesuai.
@@ -1983,7 +2001,7 @@ async function adminApi(action, payload={}){
     throw new Error('GAGAL_KONEKSI: '+(netErr?.message||netErr)+' — cek internet / URL GAS.');
   }finally{clearTimeout(timeoutId);}
   let j;
-  try{ j=await r.json(); }
+  try{ j=await sttReadJson(r); }
   catch(parseErr){ throw new Error('RESPON_BUKAN_JSON (HTTP '+r.status+'). Kemungkinan deployment GAS belum "New version" / akses "Anyone".'); }
   if(!j || j.status==='error' || j.ok===false) throw new Error(j?.message||j?.error||'ADMIN backend menolak permintaan.');
   return j;
@@ -5123,7 +5141,7 @@ renderAreas();
     submitting=true;if(btn){btn.disabled=true;btn.textContent='⏳ MEMERIKSA...';}
     try{
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'USER_LOGIN',username:username,password:password}).toString()});
-      const j=await r.json();
+      const j=await sttReadJson(r);
       if(j&&j.ok!==false&&String(j.status||'').toLowerCase()==='allowed'){
         saveCreds(username,password);
         try{localStorage.setItem('stt_user_name',username)}catch(e){}
@@ -5155,7 +5173,7 @@ renderAreas();
     checking=true;
     try{
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'USER_LOGIN',username:creds.u,password:creds.p}).toString()});
-      const j=await r.json();
+      const j=await sttReadJson(r);
       if(j&&j.ok!==false&&String(j.status||'').toLowerCase()==='allowed'){
         try{if(j.user_token)localStorage.setItem('STT_USER_TOKEN_V1',String(j.user_token));}catch(e){}
         try{if(j.area_id)localStorage.setItem('STT_USER_AREA_V1',String(j.area_id));}catch(e){}
@@ -5217,7 +5235,7 @@ renderAreas();
     if(btn){btn.disabled=true;btn.textContent='⏳ MENYIMPAN...';}
     try{
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'ADMIN_CREATE_USER',username:username,password:password,is_admin:isAdmin?'true':'',area_ids:areaIds.join(','),admin_session:adminSessionToken||''}).toString()});
-      const j=await r.json();
+      const j=await sttReadJson(r);
       if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal menyimpan user.');
       if(msgEl){msgEl.textContent='✅ User "'+username+'" tersimpan.'+(isAdmin?' (ADMIN)':'');msgEl.style.color='#059669';}
       if(uEl)uEl.value='';if(pEl)pEl.value='';if(aEl)aEl.checked=false;if(aA)aA.checked=true;if(aB)aB.checked=true;
@@ -5232,7 +5250,7 @@ renderAreas();
     list.textContent='⏳ Memuat...';
     try{
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'LIST_USERS',admin_session:adminSessionToken||''}).toString()});
-      const j=await r.json();
+      const j=await sttReadJson(r);
       if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal memuat daftar user.');
       const data=Array.isArray(j.data)?j.data:[];
       if(!data.length){list.innerHTML='<div class="small">Belum ada user.</div>';return;}
@@ -5263,7 +5281,7 @@ renderAreas();
     const rows=[...((list&&list.querySelectorAll('[data-stt-user-row]'))||[])];
     // Ambil data terbaru dari LIST_USERS agar modal tidak bergantung pada DOM text.
     fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'LIST_USERS',admin_session:adminSessionToken||''}).toString()})
-      .then(r=>r.json()).then(j=>{
+      .then(r=>sttReadJson(r)).then(j=>{
         if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal membaca data user.');
         const u=(Array.isArray(j.data)?j.data:[]).find(x=>String(x.username).toLowerCase()===String(username).toLowerCase());
         if(!u)throw new Error('User tidak ditemukan.');
@@ -5321,7 +5339,7 @@ renderAreas();
           save.disabled=true;save.textContent='⏳ MENYIMPAN...';msg.textContent='';
           try{
             const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'UPDATE_USER',username:String(u.username),new_username:newUsername,password:password,is_admin:isAdmin?'true':'',area_id:areaId,area_ids:areaIds.join(','),status:status,admin_session:adminSessionToken||''}).toString()});
-            const j=await r.json();
+            const j=await sttReadJson(r);
             if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal mengubah user.');
             closeUserEditModal();
             loadUserList();
@@ -5337,7 +5355,7 @@ renderAreas();
     if(!confirm('Hapus user "'+username+'" secara permanen?\n\nData login user akan dihapus dari daftar USER.'))return;
     try{
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'DELETE_USER',username:username,admin_session:adminSessionToken||''}).toString()});
-      const j=await r.json();
+      const j=await sttReadJson(r);
       if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal menghapus user.');
       loadUserList();
     }catch(e){alert('❌ '+e.message);}
@@ -5347,7 +5365,7 @@ renderAreas();
     if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
     try{
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'SET_USER_STATUS',username:username,status:newStatus,admin_session:adminSessionToken||''}).toString()});
-      const j=await r.json();
+      const j=await sttReadJson(r);
       if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal mengubah status');
       loadUserList();
     }catch(e){alert('❌ '+e.message);}
@@ -5455,8 +5473,8 @@ function cacheRead(){try{const x=JSON.parse(localStorage.getItem(CACHE)||'{}');r
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 async function fetchTimeout(url,opts={},timeout=REQUEST_TIMEOUT){const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeout);try{return await fetch(url,Object.assign({},opts,{signal:c.signal}));}finally{clearTimeout(timer);}}
 async function retry(fn,label){let last;for(let i=0;i<=RETRIES;i++){try{return await fn();}catch(e){last=e;if(i<RETRIES){msg('⏳ '+label+' — mencoba lagi ('+(i+1)+'/'+RETRIES+')...',false);await sleep(500*(i+1));}}}throw last;}
-async function getMeta(){if(!API)throw new Error('Central Web App URL belum dikonfigurasi.');const r=await retry(()=>fetchTimeout(API+'?action=GET_META&t='+Date.now(),{cache:'no-store'},REQUEST_TIMEOUT),'Membaca status Central');if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();if(j.status!=='success')throw new Error(j.message||'Central error');return String(j.revision||'');}
-async function getCentral(){if(!API)throw new Error('Central Web App URL belum dikonfigurasi.');const r=await retry(()=>fetchTimeout(API+'?action=GET_FINDINGS&t='+Date.now(),{cache:'no-store'},REQUEST_TIMEOUT),'Mengambil Finding Central');if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();if(j.status!=='success')throw new Error(j.message||'Central error');return {findings:Array.isArray(j.data)?j.data.map(normalize):[],revision:String(j.revision||'')};}
+async function getMeta(){if(!API)throw new Error('Central Web App URL belum dikonfigurasi.');const r=await retry(()=>fetchTimeout(API+'?action=GET_META&t='+Date.now(),{cache:'no-store'},REQUEST_TIMEOUT),'Membaca status Central');if(!r.ok)throw new Error('HTTP '+r.status);const j=await sttReadJson(r);if(j.status!=='success')throw new Error(j.message||'Central error');return String(j.revision||'');}
+async function getCentral(){if(!API)throw new Error('Central Web App URL belum dikonfigurasi.');const r=await retry(()=>fetchTimeout(API+'?action=GET_FINDINGS&t='+Date.now(),{cache:'no-store'},REQUEST_TIMEOUT),'Mengambil Finding Central');if(!r.ok)throw new Error('HTTP '+r.status);const j=await sttReadJson(r);if(j.status!=='success')throw new Error(j.message||'Central error');return {findings:Array.isArray(j.data)?j.data.map(normalize):[],revision:String(j.revision||'')};}
 async function postJson(payload){
 if(!API)throw new Error('Central Web App URL belum dikonfigurasi.');
 const p=payload||{};
@@ -5467,7 +5485,7 @@ else if(p.action==='DELETE_FINDING'){Object.assign(body,{finding_id:p.finding_id
 else {Object.assign(body,{payload:JSON.stringify(p)});}
 return await retry(async()=>{
   const r=await fetchTimeout(API,{method:'POST',mode:'cors',credentials:'omit',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(body).toString()},REQUEST_TIMEOUT);
-  const j=await r.json();
+  const j=await sttReadJson(r);
   if(!j||(j.status!=='success'&&j.ok!==true))throw new Error((j&&(j.message||j.error))||'Central POST gagal.');
   return j;
 },'Mengirim perubahan Central');
@@ -5483,7 +5501,7 @@ async function uploadPhoto(blob,meta,index,total){
   return await retry(async()=>{
     const body=new URLSearchParams({action:'UPLOAD_PHOTO_BASE64',admin_session:adminSessionToken||'',token:adminSessionToken||'',finding_id:meta.findingId||'',mime,filename,data_base64:base64}).toString();
     const r=await fetchTimeout(API,{method:'POST',mode:'cors',credentials:'omit',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body},UPLOAD_TIMEOUT);
-    const j=await r.json();
+    const j=await sttReadJson(r);
     if(j&&j.url)return j.url;
     if(j&&j.photo&&j.photo.url)return j.photo.url;
     throw new Error((j&&(j.message||j.error))||'Upload foto gagal.');
@@ -5625,7 +5643,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V15 ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V22 ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5651,7 +5669,7 @@ function showAreaError(d,msg){try{let e=document.getElementById('sttAreaGateMsg'
 async function validateArea(a){
   const token=get(K.T);if(!token)return {ok:false,message:'Sesi login tidak ditemukan. Silakan login ulang.'};
   try{const central=(typeof STT_FINDING_CENTRAL_URL==='string'&&STT_FINDING_CENTRAL_URL.trim())?STT_FINDING_CENTRAL_URL.trim():'';if(!central)return {ok:true};
-    const r=await fetch(central,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'VALIDATE_AREA',user_token:token,area_id:a}).toString()});const j=await r.json();
+    const r=await fetch(central,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'VALIDATE_AREA',user_token:token,area_id:a}).toString()});const j=await sttReadJson(r);
     if(j&&j.ok!==false)return {ok:true};return {ok:false,message:String(j?.message||j?.error||'Akses area ditolak.')};
   }catch(e){return {ok:false,message:'Tidak dapat memverifikasi area ke CENTRAL. Coba lagi.'}}
 }
@@ -5674,6 +5692,7 @@ function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){con
 function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&!aa())gate();else if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
 function adminCrud(){const box=document.getElementById('sttUserAccessManager');if(!box||box.dataset.ma==='1')return;box.dataset.ma='1';const d=document.createElement('div');d.style.cssText='margin-top:14px;padding:14px;border:2px solid #dbe5f0;border-radius:14px;background:#fbfdff';d.innerHTML='<div style="font-weight:900;color:#0b3d91;margin-bottom:10px">USER MANAGEMENT • MULTI AREA</div><div class="small">User yang sama dapat diberi akses Area A, Area B, atau keduanya.</div>';box.appendChild(d)}
 document.addEventListener('DOMContentLoaded',()=>setTimeout(install,500));setInterval(install,2000);
+window.STT_OPEN_AREA_SELECTOR=openSelector;
 window.STT_AREA_ACCESS_V21={getAllowedAreas:()=>allowed(),openSelector,saveAllowed,clear};
 })();
 </script>
