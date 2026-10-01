@@ -1271,7 +1271,7 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 .stt23-complete{margin-top:10px;padding:11px 13px;border-radius:12px;background:#f0fdf4;color:#166534;font-weight:800;font-size:13px}
 .stt23-authority{background:#eff6ff!important;color:#1e3a8a!important;border-left:5px solid #2563eb}.stt23-auto-caption{background:#f8fafc!important;color:#0f172a!important;border:1px solid #dbeafe}.stt-photo-desc.is-finding{border:3px solid #dc2626!important;background:#fee2e2!important;color:#991b1b!important;font-weight:900!important;font-size:20px!important}.stt23-picker-item{position:relative}.stt23-picker-check{width:34px;height:34px;border-radius:10px;border:2px solid #94a3b8;display:inline-flex;align-items:center;justify-content:center;background:#fff;font-size:21px;font-weight:950;flex:0 0 34px}.stt23-picker-item[data-used="true"] .stt23-picker-check{border-color:#16a34a;background:#dcfce7;color:#166534}.stt23-picker-item[data-used="false"] .stt23-picker-check{color:#64748b}.stt23-picker-badge{white-space:nowrap}.stt23-picker-item:disabled{opacity:.9;cursor:default}.stt23-picker-summary{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.stt23-picker-summary span{padding:7px 10px;border-radius:999px;font-size:12px;font-weight:900;background:#f1f5f9;color:#334155}.stt23-picker-summary .done{background:#dcfce7;color:#166534}@media(max-width:680px){.stt23-add-btn{font-size:16px!important}.stt23-template{padding:13px}.stt23-checks{font-size:13px}}
 </style>
-<meta name="stt-build" content="V26-FINAL-2026-10-01-AREA-PICKER-BACKEND-TEMPLATES-FAST-LOGIN">
+<meta name="stt-build" content="V30-FINAL-2026-10-01-DYNAMIC-AREAS-DURABLE-SESSION-RENAME">
 </head>
 <body>
 
@@ -1920,7 +1920,7 @@ const DEFAULT_LOGO_LEFT_URL = DEFAULT_LOGO_URL;
 const DEFAULT_LOGO_RIGHT_URL = DEFAULT_LOGO_URL;
 // ===== GAS CONFIG — GANTI URL GAS DI SINI SAJA =====
 // Semua fungsi backend (ADMIN, PDF upload, Finding Central) memakai URL ini.
-const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbx444U3NRZZ6uMAQAsroavrGUF3a_wp7XwreNWlf5EwXZiMJtKnlELfOwu9UbRJFyn4GA/exec"],CREATED_BY="Mbah Pri";
+const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbwe8JbKVuKlVR_Da-fivzTSnczfJzU_hLIEqYvvN2aOq3aeksJcuUs071ZLF7gTofd--Q/exec"],CREATED_BY="Mbah Pri";
 const ADMIN_AUTH_ENDPOINT = GAS_API_ENDPOINTS[0];
 const PDF_UPLOAD_URL = GAS_API_ENDPOINTS[0];
 const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
@@ -3440,12 +3440,12 @@ function setupSuperCleanup() {
     // Flow PATROLI: klik tombol -> pilih AREA A/B -> baru pilih titik/template.
     document.getElementById('addAreaCameraBtn')?.addEventListener('click', () => {
       const actNow=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
-      if(actNow==='AREA_A'||actNow==='AREA_B'){ open23AreaPicker(); return; }
+      if(actNow&&actNow!=='ALL'){ open23AreaPicker(); return; }
       const token=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
       const allowedRaw=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
-      const assigned=allowedRaw.split(',').map(x=>String(x).trim().toUpperCase()).filter(x=>x==='AREA_A'||x==='AREA_B');
+      const assigned=allowedRaw.split(',').map(x=>String(x).trim().toUpperCase()).filter(Boolean);
       const isAdmin=String(localStorage.getItem('STT_USER_AREA_V1')||'').toUpperCase()==='ALL' || !!window.adminUnlocked || !!window.adminBypass;
-      if(typeof window.STT_OPEN_AREA_SELECTOR==='function') window.STT_OPEN_AREA_SELECTOR({is_admin:isAdmin,area_ids:isAdmin?['AREA_A','AREA_B']:assigned,user_token:token,openPointPicker:true});
+      if(typeof window.STT_OPEN_AREA_SELECTOR==='function') window.STT_OPEN_AREA_SELECTOR({is_admin:isAdmin,area_ids:isAdmin?AREAS:assigned,user_token:token,openPointPicker:true});
       else open23AreaPicker();
     });
 
@@ -3935,7 +3935,7 @@ function setupSuperCleanup() {
     window.STT_BACKEND_CUSTOM_TEMPLATES=window.STT_BACKEND_CUSTOM_TEMPLATES||{};
     async function loadBackendCustomTemplates_(active, force=false){
       active=String(active||'').toUpperCase();
-      if(active!=='AREA_A'&&active!=='AREA_B')return [];
+      if(!active||active==='ALL')return [];
       if(!force && Array.isArray(window.STT_BACKEND_CUSTOM_TEMPLATES[active])) return window.STT_BACKEND_CUSTOM_TEMPLATES[active];
       const token=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
       const central=(typeof STT_FINDING_CENTRAL_URL==='string'&&STT_FINDING_CENTRAL_URL.trim())?STT_FINDING_CENTRAL_URL.trim():'';
@@ -3948,14 +3948,14 @@ function setupSuperCleanup() {
       window.STT_BACKEND_CUSTOM_TEMPLATES[active]=[]; return [];
     }
     function getAreaPickerTemplates_(active, custom){
-      const fixed=(active==='AREA_B'&&window.STT_AREA_B_MASTER)?window.STT_AREA_B_MASTER.templates:(window.STT_FIXED_23_AREA_TEMPLATES||[]);
+      const fixed=active==='AREA_B'&&window.STT_AREA_B_MASTER?window.STT_AREA_B_MASTER.templates:(active==='AREA_A'?(window.STT_FIXED_23_AREA_TEMPLATES||[]):[]);
       const builtins=fixed.map(t=>Object.assign({},t,{customArea:false}));
       return builtins.concat(Array.isArray(custom)?custom.map((t,i)=>Object.assign({},t,{customArea:true,order:null,customOrder:i+1})):[]);
     }
     async function render23AreaPicker(filter=''){
       const list=document.getElementById('stt23PickerList'); if(!list)return;
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
-      if(active!=='AREA_A'&&active!=='AREA_B'){list.innerHTML='<div class="stt23-picker-empty">Pilih AREA A atau AREA B (bukan ALL) untuk memilih titik.</div>';return;}
+      if(!active||active==='ALL'){list.innerHTML='<div class="stt23-picker-empty">Pilih AREA kerja terlebih dahulu untuk memilih titik.</div>';return;}
       const custom=await loadBackendCustomTemplates_(active);
       const templates=getAreaPickerTemplates_(active,custom),used=getUsedTemplateIdsForActiveArea_(),q=String(filter||'').trim().toUpperCase();
       const visible=templates.filter(t=>!q||String(t.name||'').toUpperCase().includes(q)||String(t.order??'').includes(q));
@@ -3971,7 +3971,7 @@ function setupSuperCleanup() {
       }).join('');
       list.innerHTML=html;
       list.querySelectorAll('.stt23-picker-item:not(:disabled)').forEach(b=>b.onclick=()=>addNewArea(b.dataset.templateId));
-      const title=document.getElementById('stt23PickerTitle');if(title)title.textContent='📍 '+(active==='AREA_B'?'AREA B':'AREA A');
+      const title=document.getElementById('stt23PickerTitle');if(title)title.textContent='📍 '+areaLabel_(active);
     }
     async function open23AreaPicker(){
       const modal=document.getElementById('stt23AreaPicker');
@@ -4003,7 +4003,7 @@ function setupSuperCleanup() {
       const name=String(nameEl?.value||'').trim().replace(/\s+/g,' '),checks=String(checksEl?.value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase(),token=String(localStorage.getItem('STT_USER_TOKEN_V1')||''),central=(typeof STT_FINDING_CENTRAL_URL==='string'&&STT_FINDING_CENTRAL_URL.trim())?STT_FINDING_CENTRAL_URL.trim():'';
       if(!name){alert('⚠️ Masukkan nama titik custom terlebih dahulu.');nameEl?.focus();return false;}
-      if(active!=='AREA_A'&&active!=='AREA_B'){alert('⚠️ Pilih Area A atau Area B terlebih dahulu.');return false;}
+      if(!active||active==='ALL'){alert('⚠️ Pilih Area kerja terlebih dahulu.');return false;}
       if(!token||!central){alert('❌ Sesi login/backend tidak tersedia.');return false;}
       const btn=document.getElementById('sttCustomAreaAddBtn'); if(btn){btn.disabled=true;btn.textContent='⏳ MENYIMPAN TEMPLATE...';}
       try{
@@ -4026,7 +4026,7 @@ function setupSuperCleanup() {
       const custom=Array.isArray(window.STT_BACKEND_CUSTOM_TEMPLATES?.[active])?window.STT_BACKEND_CUSTOM_TEMPLATES[active]:[];
       const templates=getAreaPickerTemplates_(active,custom),template=templates.find(t=>String(t.id)===String(templateId));
       if(!template)return false;
-      if(active!=='AREA_A'&&active!=='AREA_B'){alert('⚠️ Pilih Area A atau Area B terlebih dahulu.');return false;}
+      if(!active||active==='ALL'){alert('⚠️ Pilih Area kerja terlebih dahulu.');return false;}
       if(/^STT-[AB]\d+$/i.test(String(template.id))&&String(template.id).toUpperCase().charAt(4)!==(active==='AREA_B'?'B':'A'))return false;
       const used=getUsedTemplateIdsForActiveArea_(); if(used.has(String(template.id))){return false;}
       const id=nextAreaId(),displayName=String(template.name||'').toUpperCase();
@@ -4037,10 +4037,10 @@ function setupSuperCleanup() {
     function update23AreaCounter(){
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
       const n=active==='AREA_B'?getUsedAreaBTemplateIds().size:getUsedAreaATemplateIds().size;
-      const base=(active==='AREA_B'&&window.STT_AREA_B_MASTER)?window.STT_AREA_B_MASTER.templates.length:((window.STT_FIXED_23_AREA_TEMPLATES||[]).length||23);
+      const base=(active==='AREA_B'&&window.STT_AREA_B_MASTER)?window.STT_AREA_B_MASTER.templates.length:(active==='AREA_A'?(window.STT_FIXED_23_AREA_TEMPLATES||[]).length:0)+((Array.isArray(window.STT_BACKEND_CUSTOM_TEMPLATES?.[active])?window.STT_BACKEND_CUSTOM_TEMPLATES[active]:[]).length);
       const el=document.getElementById('stt23AreaCounter');
       const btn=document.getElementById('addAreaCameraBtn');
-      if(el)el.textContent=`${n} / ${base} TITIK DIPILIH`;
+      if(el)el.textContent=`${n} / ${base} TITIK TERSEDIA • ${areaLabel_(active)}`;
       if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-map-marked-alt"></i> PILIH AREA PATROLI';}
     }
 
@@ -5320,6 +5320,7 @@ renderAreas();
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'VALIDATE_SESSION',user_token:token}).toString(),cache:'no-store'});
       const j=await sttReadJson(r);
       if(j&&j.ok!==false&&j.validated){
+        try{await refreshDynamicAreas_(token,true);}catch(_){ }
         if(j.user_token)try{localStorage.setItem('STT_USER_TOKEN_V1',String(j.user_token))}catch(e){}
         try{localStorage.setItem('STT_ALLOWED_AREAS_V1',Array.isArray(j.area_ids)?j.area_ids.join(','):String(j.area_ids||j.area_id||''));}catch(e){}
         if(j.is_admin){setAdminBypass(true);try{localStorage.setItem('STT_ADMIN_SESSION_V1',token)}catch(e){}}
@@ -5363,23 +5364,69 @@ renderAreas();
           <div class="small" style="margin-bottom:6px"><b>➕ Buat / Reset User</b></div>
           <input id="ugNewUser" class="dac-input" placeholder="Username" autocomplete="off" style="margin-bottom:8px">
           <input id="ugNewPass" class="dac-input" type="text" placeholder="Password (min 4 karakter)" autocomplete="off">
-          <label class="small" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input id="ugNewIsAdmin" type="checkbox"> Jadikan ADMIN (bypass, tidak dikunci background check)</label><div id="ugNewAreas" style="margin-top:8px"><div class="small"><b>Area patroli user</b></div><label class="small" style="display:inline-flex;gap:6px;margin:4px 12px 0 0"><input id="ugNewAreaA" type="checkbox" checked> AREA A</label><label class="small" style="display:inline-flex;gap:6px;margin-top:4px"><input id="ugNewAreaB" type="checkbox" checked> AREA B</label></div>
+          <label class="small" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input id="ugNewIsAdmin" type="checkbox"> Jadikan ADMIN (bypass, tidak dikunci background check)</label><div id="ugNewAreas" style="margin-top:8px"><div class="small"><b>Area patroli user</b></div><div id="ugNewAreaChecks"></div></div>
           <button id="ugCreateBtn" type="button" class="btn btn-primary" style="margin-top:8px;width:100%">💾 SIMPAN USER</button>
           <div id="ugCreateMsg" class="small" style="margin-top:6px"></div>
         </div>
         <div id="ugUserList" style="margin-top:12px"></div>
-        <button id="ugListRefresh" type="button" class="btn btn-ghost" style="margin-top:8px">↻ REFRESH DAFTAR USER</button>`;
+        <button id="ugListRefresh" type="button" class="btn btn-ghost" style="margin-top:8px">↻ REFRESH DAFTAR USER</button>
+        <div id="sttDynamicAreaManager" style="margin-top:16px;padding:14px;border:2px solid #dbe5f0;border-radius:14px;background:#fff">
+          <div style="font-weight:900;color:#0b3d91;margin-bottom:8px">📍 MANAJEMEN AREA DINAMIS</div>
+          <div class="small">Tambah Area C, D, E, dst. Area dan template titiknya tersimpan permanen di backend.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+            <input id="sttNewAreaId" class="dac-input" placeholder="ID: AREA_C" maxlength="30">
+            <input id="sttNewAreaName" class="dac-input" placeholder="Nama area: GROUND FLOOR 100" maxlength="120">
+          </div>
+          <button id="sttCreateAreaBtn" type="button" class="btn btn-success" style="margin-top:8px;width:100%">➕ TAMBAH AREA</button>
+          <div id="sttAreaRegistryList" class="small" style="margin-top:10px"></div>
+        </div>`;
       admin.appendChild(box);
       box.querySelector('#ugListRefresh').onclick=loadUserList;
       box.querySelector('#ugCreateBtn').onclick=submitCreateUser;
+      box.querySelector('#sttCreateAreaBtn').onclick=createDynamicArea_;
+      refreshDynamicAreaManager_();
     }
     updateAdminPanel();
   }
 
-  async function submitCreateUser(){
+  async function refreshDynamicAreaManager_(){
+  const list=document.getElementById('sttAreaRegistryList'); if(!list||!CENTRAL||!adminSessionToken)return;
+  try{
+    const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+      body:new URLSearchParams({action:'GET_AREAS',user_token:localStorage.getItem('STT_USER_TOKEN_V1')||'',admin_session:adminSessionToken}).toString(),cache:'no-store'});
+    const j=await sttReadJson(r); if(!j||j.ok===false)throw new Error(j?.message||j?.error||'Gagal membaca area.');
+    const arr=Array.isArray(j.areas)?j.areas:[];
+    const names={};arr.forEach(x=>names[String(x.area_id).toUpperCase()]=String(x.area_name||x.area_id).toUpperCase());
+    try{localStorage.setItem('STT_AREA_NAMES_V1',JSON.stringify(names));}catch(_){}
+    AREAS.splice(0,AREAS.length,...(arr.map(x=>String(x.area_id).toUpperCase()).filter(Boolean)));
+    saveAllowed(AREAS);
+    const checks=document.getElementById('ugNewAreaChecks');
+    if(checks)checks.innerHTML=arr.map(a=>`<label class="small" style="display:inline-flex;gap:6px;margin:4px 12px 0 0"><input type="checkbox" data-area-id="${String(a.area_id)}" checked> ${String(a.area_name||a.area_id)}</label>`).join('');
+    list.innerHTML=arr.map(a=>`<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #eef2f7"><b>${String(a.area_id)}</b><span>— ${String(a.area_name||'')}</span><button type="button" class="btn btn-ghost" style="margin-left:auto;padding:7px 10px" data-edit-area="${String(a.area_id)}" data-edit-name="${String(a.area_name||'').replace(/"/g,'&quot;')}">EDIT</button>${!['AREA_A','AREA_B'].includes(String(a.area_id).toUpperCase())?`<button type="button" class="btn btn-danger" style="padding:7px 10px" data-del-area="${String(a.area_id)}">HAPUS</button>`:''}</div>`).join('');
+    list.querySelectorAll('[data-edit-area]').forEach(b=>b.onclick=async()=>{
+      const next=prompt('Nama '+b.dataset.editArea+':',b.dataset.editName||''); if(next===null||!String(next).trim())return;
+      try{const rr=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'UPDATE_AREA',area_id:b.dataset.editArea,area_name:String(next).trim(),admin_session:adminSessionToken}).toString()});const jj=await sttReadJson(rr);if(jj?.ok===false)throw new Error(jj.message||jj.error);await refreshDynamicAreaManager_();}catch(e){alert('❌ '+(e.message||e));}
+    });
+    list.querySelectorAll('[data-del-area]').forEach(b=>b.onclick=async()=>{if(!confirm('Hapus area '+b.dataset.delArea+'? Data/template lama tidak akan dihapus otomatis.'))return;try{const rr=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'DELETE_AREA',area_id:b.dataset.delArea,admin_session:adminSessionToken}).toString()});const jj=await sttReadJson(rr);if(jj?.ok===false)throw new Error(jj.message||jj.error);await refreshDynamicAreaManager_();}catch(e){alert('❌ '+(e.message||e));}});
+  }catch(e){list.textContent='❌ '+(e.message||e);}
+}
+async function createDynamicArea_(){
+  const idEl=document.getElementById('sttNewAreaId'),nameEl=document.getElementById('sttNewAreaName');
+  const id=String(idEl?.value||'').trim().toUpperCase().replace(/[\s-]+/g,'_'),name=String(nameEl?.value||'').trim();
+  if(!/^AREA_[A-Z0-9]+$/.test(id)||!name){alert('Isi ID AREA_C/D/... dan nama area.');return;}
+  try{
+    const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+      body:new URLSearchParams({action:'CREATE_AREA',area_id:id,area_name:name,admin_session:adminSessionToken}).toString()});
+    const j=await sttReadJson(r);if(!j||j.ok===false)throw new Error(j?.message||j?.error||'Gagal membuat area.');
+    if(idEl)idEl.value='';if(nameEl)nameEl.value='';await refreshDynamicAreaManager_();alert('✅ '+name.toUpperCase()+' tersimpan. Sekarang pilih area tersebut lalu buat titik/template CUSTOM.');
+  }catch(e){alert('❌ '+(e.message||e));}
+}
+
+async function submitCreateUser(){
     const box=document.getElementById('sttUserAccessManager');if(!box)return;
-    const uEl=box.querySelector('#ugNewUser'),pEl=box.querySelector('#ugNewPass'),aEl=box.querySelector('#ugNewIsAdmin'),aA=box.querySelector('#ugNewAreaA'),aB=box.querySelector('#ugNewAreaB'),msgEl=box.querySelector('#ugCreateMsg'),btn=box.querySelector('#ugCreateBtn');
-    const username=(uEl&&uEl.value||'').trim(),password=(pEl&&pEl.value||'').trim(),isAdmin=!!(aEl&&aEl.checked),areaIds=isAdmin?['AREA_A','AREA_B']:[...(aA?.checked?['AREA_A']:[]),...(aB?.checked?['AREA_B']:[])];
+    const uEl=box.querySelector('#ugNewUser'),pEl=box.querySelector('#ugNewPass'),aEl=box.querySelector('#ugNewIsAdmin'),msgEl=box.querySelector('#ugCreateMsg'),btn=box.querySelector('#ugCreateBtn');
+    const username=(uEl&&uEl.value||'').trim(),password=(pEl&&pEl.value||'').trim(),isAdmin=!!(aEl&&aEl.checked);
+    const areaIds=isAdmin?AREAS.slice():[...box.querySelectorAll('#ugNewAreaChecks input[data-area-id]:checked')].map(x=>x.dataset.areaId);
     if(msgEl)msgEl.textContent='';
     if(!username||password.length<4){if(msgEl){msgEl.textContent='Username & password (min 4) wajib diisi.';msgEl.style.color='#b42318';}return;}
     if(!CENTRAL){alert('URL CENTRAL belum dipasang.');return;}
@@ -5389,7 +5436,7 @@ renderAreas();
       const j=await sttReadJson(r);
       if(!j||j.ok===false)throw new Error((j&&(j.message||j.error))||'Gagal menyimpan user.');
       if(msgEl){msgEl.textContent='✅ User "'+username+'" tersimpan.'+(isAdmin?' (ADMIN)':'');msgEl.style.color='#059669';}
-      if(uEl)uEl.value='';if(pEl)pEl.value='';if(aEl)aEl.checked=false;if(aA)aA.checked=true;if(aB)aB.checked=true;
+      if(uEl)uEl.value='';if(pEl)pEl.value='';if(aEl)aEl.checked=false;box.querySelectorAll('#ugNewAreaChecks input[data-area-id]').forEach(x=>x.checked=true);
       loadUserList();
     }catch(e){if(msgEl){msgEl.textContent='❌ '+e.message;msgEl.style.color='#b42318';}}
     finally{if(btn){btn.disabled=false;btn.textContent='💾 SIMPAN USER';}}
@@ -5452,10 +5499,7 @@ renderAreas();
           <input id="sttEditPassword" class="dac-input" type="text" placeholder="Password baru, minimal 4 karakter" autocomplete="off" style="margin:5px 0 10px;width:100%">
           <label class="small" style="display:flex;align-items:center;gap:8px;margin:5px 0 12px"><input id="sttEditAdmin" type="checkbox" ${u.is_admin?'checked':''}> Jadikan ADMIN</label>
           <label class="small"><b>Area patroli</b></label>
-          <div style="margin:6px 0 14px;padding:10px;border:1px solid #dbe5f0;border-radius:10px;background:#f8fafc">
-            <label class="small" style="display:inline-flex;gap:6px;margin-right:16px"><input id="sttEditAreaA" type="checkbox"> AREA A</label>
-            <label class="small" style="display:inline-flex;gap:6px"><input id="sttEditAreaB" type="checkbox"> AREA B</label>
-          </div>
+          <div id="sttEditAreaChecks" style="margin:6px 0 14px;padding:10px;border:1px solid #dbe5f0;border-radius:10px;background:#f8fafc;display:flex;flex-wrap:wrap;gap:8px"></div>
           <label class="small"><b>Status</b></label>
           <select id="sttEditStatus" class="dac-input" style="margin:5px 0 14px;width:100%">
             <option value="allowed" ${String(u.status||'').toLowerCase()!=='blocked'?'selected':''}>ALLOWED</option>
@@ -5468,10 +5512,11 @@ renderAreas();
           </div>
         </div>`;
         document.body.appendChild(m);
-        const adminEl=m.querySelector('#sttEditAdmin'), areaAEl=m.querySelector('#sttEditAreaA'), areaBEl=m.querySelector('#sttEditAreaB');
+        const adminEl=m.querySelector('#sttEditAdmin'), areaBox=m.querySelector('#sttEditAreaChecks');
         const currentAreas=Array.isArray(u.area_ids)?u.area_ids:(u.area_id?[u.area_id]:['AREA_A','AREA_B']);
-        areaAEl.checked=currentAreas.includes('AREA_A'); areaBEl.checked=currentAreas.includes('AREA_B');
-        const sync=()=>{areaAEl.disabled=!!adminEl.checked;areaBEl.disabled=!!adminEl.checked;if(adminEl.checked){areaAEl.checked=true;areaBEl.checked=true;}};
+        const editAreas=AREAS.slice();
+        if(areaBox)areaBox.innerHTML=editAreas.map(a=>`<label class="small" style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" data-edit-area-id="${a}" ${currentAreas.includes(a)?'checked':''}> ${areaLabel_(a)}</label>`).join('');
+        const sync=()=>{areaBox?.querySelectorAll('input[data-edit-area-id]').forEach(x=>{x.disabled=!!adminEl.checked;if(adminEl.checked)x.checked=true;});};
         adminEl.onchange=sync;
         m.querySelector('#sttEditClose').onclick=closeUserEditModal;
         m.querySelector('#sttEditCancel').onclick=closeUserEditModal;
@@ -5481,7 +5526,7 @@ renderAreas();
           const newUsername=m.querySelector('#sttEditUsername').value.trim().toLowerCase();
           const password=m.querySelector('#sttEditPassword').value;
           const isAdmin=!!adminEl.checked;
-          const areaIds=isAdmin?['AREA_A','AREA_B']:[...(areaAEl.checked?['AREA_A']:[]),...(areaBEl.checked?['AREA_B']:[])];
+          const areaIds=isAdmin?AREAS.slice():[...areaBox.querySelectorAll('input[data-edit-area-id]:checked')].map(x=>x.dataset.editAreaId);
           const areaId=isAdmin?'ALL':(areaIds[0]||'');
           const status=m.querySelector('#sttEditStatus').value;
           if(!newUsername){msg.textContent='❌ Username wajib diisi.';msg.style.color='#b42318';return;}
@@ -5805,9 +5850,9 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #sttAreaBadgeV15{display:inline-flex;align-items:center;gap:7px;margin-left:10px;padding:5px 10px;border-radius:999px;background:#eaf2ff;color:#164e8a;font-size:11px;font-weight:900}
 @media(max-width:560px){#sttAreaGateV15 .stt-area-grid{grid-template-columns:1fr}#sttAreaGateV15 .stt-area-btn.all{grid-column:auto}}
 </style>
-<script id="STT_MULTI_AREA_ACCESS_V30">
+<script id="STT_MULTI_AREA_ACCESS_V30_DYNAMIC">
 (function(){'use strict';
-const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',P:'STT_ALLOWED_AREAS_V1'}, AREAS=['AREA_A','AREA_B'];
+const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',P:'STT_ALLOWED_AREAS_V1',N:'STT_AREA_NAMES_V1'}, AREAS=['AREA_A','AREA_B'];
 const n=v=>{const s=String(v??'').trim().toUpperCase().replace(/[\s-]+/g,'_');return s==='ALL'?'ALL':(AREAS.includes(s)?s:'')};
 const bool=v=>v===true||v===1||['true','1','yes'].includes(String(v??'').trim().toLowerCase());
 const get=k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set=(k,v)=>{try{localStorage.setItem(k,String(v))}catch(e){}},del=k=>{try{localStorage.removeItem(k)}catch(e){}};
@@ -5822,16 +5867,51 @@ async function validateArea(a){
     if(j&&j.ok!==false)return {ok:true};return {ok:false,message:String(j?.message||j?.error||'Akses area ditolak.')};
   }catch(e){return {ok:false,message:'Tidak dapat memverifikasi area ke CENTRAL. Coba lagi.'}}
 }
-function openSelector(info){
-  const admin=bool(info?.is_admin);let assigned=areas(info?.area_ids);if(admin)assigned=AREAS.slice();if(!assigned.length){const one=n(info?.area_id);if(one)assigned=[one];}
-  if(info?.user_token)set(K.T,info.user_token);saveAllowed(admin?AREAS:assigned);
+async function refreshDynamicAreas_(token, force=false){
+  try{
+    if(!token||!CENTRAL)return;
+    const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+      body:new URLSearchParams({action:'GET_AREAS',user_token:token}).toString(),cache:'no-store'});
+    const j=await r.clone().json();
+    if(j&&j.ok!==false&&Array.isArray(j.areas)){
+      const ids=j.areas.map(x=>String(x.area_id||'').toUpperCase()).filter(Boolean);
+      const names={}; j.areas.forEach(x=>names[String(x.area_id||'').toUpperCase()]=String(x.area_name||x.area_id||'').toUpperCase());
+      AREAS.splice(0,AREAS.length,...(ids.length?ids:['AREA_A','AREA_B']));
+      set(K.N,JSON.stringify(names));
+      return ids;
+    }
+  }catch(e){console.warn('[AREA REGISTRY]',e);}
+  return AREAS.slice();
+}
+function areaLabel_(id){
+  const a=String(id||'').toUpperCase(); if(a==='ALL')return 'ALL AREA';
+  try{const m=JSON.parse(localStorage.getItem(K.N)||'{}');if(m[a])return m[a];}catch(_){}
+  return a.replace(/_/g,' ');
+}
+async function openSelector(info){
+  const admin=bool(info?.is_admin);
+  let assigned=areas(info?.area_ids);
+  if(admin)assigned=AREAS.slice();
+  if(!assigned.length){const one=n(info?.area_id);if(one)assigned=[one];}
+  if(info?.user_token){set(K.T,info.user_token);await refreshDynamicAreas_(info.user_token);}
+  if(admin)assigned=AREAS.slice();
+  saveAllowed(admin?AREAS:assigned);
   const old=document.getElementById('sttAreaGateV15');if(old)old.remove();
   const d=document.createElement('div');d.id='sttAreaGateV15';
-  const buttons=(admin?AREAS:assigned).map(a=>'<button class="stt-area-btn" data-a="'+a+'">📍 '+a.replace('_',' ')+'</button>').join('');
+  const buttons=(admin?AREAS:assigned).map(a=>'<button class="stt-area-btn" data-a="'+a+'">📍 '+areaLabel_(a)+'</button>').join('');
   const all=admin?'<button class="stt-area-btn all" data-a="ALL">🌐 ALL AREA — ADMIN</button>':'';
-  d.innerHTML='<div class="stt-area-card"><h2>📍 PILIH AREA KERJA</h2><p>Pilih area yang akan digunakan untuk sesi patroli ini. User yang memiliki akses lebih dari satu area dapat berpindah Area A ↔ Area B kapan saja.</p><div class="stt-area-grid">'+buttons+all+'</div></div>';
+  d.innerHTML='<div class="stt-area-card"><h2>📍 PILIH AREA KERJA</h2><p>Pilih area yang akan digunakan untuk sesi patroli ini. Area yang tersedia dapat ditambah admin dan akan tersimpan permanen.</p><div class="stt-area-grid">'+buttons+all+'</div></div>';
   document.body.appendChild(d);
-  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{const a=n(b.dataset.a);if(!a)return;d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';const vr=await validateArea(a);if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+a.replace('_',' ');showAreaError(d,'❌ '+vr.message);return;}set(K.A,a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){}d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)};if(a!=='ALL'&&info?.openPointPicker!==false){setTimeout(()=>{try{if(typeof window.open23AreaPicker==='function')window.open23AreaPicker()}catch(e){console.warn('[POINT PICKER]',e)}},120)}});
+  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{
+    const a=n(b.dataset.a);if(!a)return;
+    d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';
+    const vr=await validateArea(a);
+    if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+areaLabel_(a);showAreaError(d,'❌ '+vr.message);return;}
+    set(K.A,a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){}
+    d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}
+    badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)}
+    if(a!=='ALL'&&info?.openPointPicker!==false){setTimeout(()=>{try{if(typeof window.open23AreaPicker==='function')window.open23AreaPicker()}catch(e){console.warn('[POINT PICKER]',e)}},120)}
+  });
 }
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const a=allowed();const isAdmin=ua()==='ALL';if(!isAdmin&&!a.length)return;openSelector({is_admin:isAdmin,area_id:a[0]||'ALL',area_ids:isAdmin?AREAS:a,user_token:get(K.T)})}
 function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!aa())return;let b=document.getElementById('sttAreaBadgeV15');if(!b){b=document.createElement('span');b.id='sttAreaBadgeV15';t.appendChild(b)}b.textContent=aa()==='ALL'?'ALL AREA':aa().replace('_',' ')}catch(e){}}
