@@ -5469,30 +5469,53 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #sttAreaBadgeV15{display:inline-flex;align-items:center;gap:7px;margin-left:10px;padding:5px 10px;border-radius:999px;background:#eaf2ff;color:#164e8a;font-size:11px;font-weight:900}
 @media(max-width:560px){#sttAreaGateV15 .stt-area-grid{grid-template-columns:1fr}#sttAreaGateV15 .stt-area-btn.all{grid-column:auto}}
 </style>
-<script id="STT_MULTI_AREA_ACCESS_V15">
+<script id="STT_MULTI_AREA_ACCESS_V17">
 (function(){'use strict';
 const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',M:'patrol_meta_v1'}, AREAS=['AREA_A','AREA_B'];
-const n=v=>{const s=String(v||'').trim().toUpperCase().replace(/[\s-]+/g,'_');return s==='ALL'?'ALL':(AREAS.includes(s)?s:'')};
+const n=v=>{const s=String(v??'').trim().toUpperCase().replace(/[\s-]+/g,'_');return s==='ALL'?'ALL':(AREAS.includes(s)?s:'')};
+const bool=v=>v===true||v===1||['true','1','yes'].includes(String(v??'').trim().toLowerCase());
 const get=k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set=(k,v)=>{try{localStorage.setItem(k,String(v))}catch(e){}},del=k=>{try{localStorage.removeItem(k)}catch(e){}};
 const ua=()=>n(get(K.U)),aa=()=>n(get(K.A));
-function swap(a){a=n(a);if(!a)return;try{const old=localStorage.getItem(K.M),sc=localStorage.getItem(K.M+'_'+a);if(old&&!sc)localStorage.setItem(K.M+'_'+a,old);const x=localStorage.getItem(K.M+'_'+a);if(x!==null)localStorage.setItem(K.M,x);else localStorage.removeItem(K.M)}catch(e){}}
+function swap(a){a=n(a);if(!a)return;try{const old=localStorage.getItem(K.M),sc=localStorage.getItem(K.M+'_'+a);if(old&&!sc)localStorage.setItem(K.M+'_'+a,old);const x=localStorage.getItem(K.M+'_'+a);if(x!==null)localStorage.setItem(K.M,x);else localStorage.removeItem(K.M)}catch(e){console.warn('[AREA SWAP]',e)}}
+function needsSelector(info){const admin=bool(info?.is_admin);const assigned=n(info?.area_id);const active=aa();if(admin)return !active;return !assigned||active!==assigned}
+function showAreaError(d,msg){try{let e=document.getElementById('sttAreaGateMsg');if(!e){e=document.createElement('div');e.id='sttAreaGateMsg';e.style.cssText='margin-top:12px;padding:10px;border-radius:10px;background:#fff1f2;color:#b42318;font-weight:800;font-size:13px';d.querySelector('.stt-area-card')?.appendChild(e)}e.textContent=msg}catch(_){} }
+async function validateArea(a){
+  const u=ua(); if(!u)return {ok:false,message:'Sesi area belum tersedia.'};
+  const token=get(K.T); if(!token)return {ok:false,message:'Sesi login tidak ditemukan. Silakan login ulang.'};
+  try{
+    const central=(typeof STT_FINDING_CENTRAL_URL==='string'&&STT_FINDING_CENTRAL_URL.trim())?STT_FINDING_CENTRAL_URL.trim():'';
+    if(!central)return {ok:true};
+    const r=await fetch(central,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'VALIDATE_AREA',user_token:token,area_id:a}).toString()});
+    const j=await r.json();
+    if(j&&j.ok!==false)return {ok:true};
+    return {ok:false,message:String(j?.message||j?.error||'Akses area ditolak.')};
+  }catch(e){return {ok:false,message:'Tidak dapat memverifikasi area ke CENTRAL. Coba lagi.'};}
+}
 function openSelector(info){
-  const admin=!!info?.is_admin || n(info?.area_id)==='ALL';
+  const admin=bool(info?.is_admin);
   const assigned=n(info?.area_id);
   if(info?.user_token)set(K.T,info.user_token);
-  if(admin)set(K.U,'ALL'); else if(assigned)set(K.U,assigned);
+  if(admin)set(K.U,'ALL'); else if(assigned)set(K.U,assigned); else {del(K.U);del(K.A);}
   const old=document.getElementById('sttAreaGateV15');if(old)old.remove();
   const d=document.createElement('div');d.id='sttAreaGateV15';
   const buttons=admin?'<button class="stt-area-btn" data-a="AREA_A">📍 AREA A</button><button class="stt-area-btn" data-a="AREA_B">📍 AREA B</button><button class="stt-area-btn all" data-a="ALL">🌐 ALL AREA — ADMIN</button>':'<button class="stt-area-btn" data-a="'+assigned+'">📍 '+assigned.replace('_',' ')+'</button>';
   d.innerHTML='<div class="stt-area-card"><h2>📍 PILIH AREA KERJA</h2><p>Pilih area yang akan digunakan. ADMIN dapat memilih Area A, Area B, atau seluruh area.</p><div class="stt-area-grid">'+buttons+'</div></div>';
   document.body.appendChild(d);
-  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{const a=n(b.dataset.a);if(!a)return;set(K.A,a);if(a!=='ALL')swap(a);d.remove();document.body.classList.remove('stt-user-locked');try{const g=document.getElementById('sttUserGate');if(g)g.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){}});
+  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{
+    const a=n(b.dataset.a);if(!a)return;
+    // User biasa hanya boleh memilih area yang ditetapkan server.
+    if(!admin&&a!==assigned){showAreaError(d,'❌ Akun ini tidak memiliki akses ke '+a.replace('_',' ')+'.');return;}
+    d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true); b.textContent='⏳ MEMERIKSA AKSES...';
+    const vr=await validateArea(a);
+    if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+a.replace('_',' ');showAreaError(d,'❌ '+vr.message+' Jika area user baru saja diubah oleh ADMIN, login ulang terlebih dahulu.');return;}
+    set(K.A,a);if(a!=='ALL')swap(a);d.remove();document.body.classList.remove('stt-user-locked');try{const g=document.getElementById('sttUserGate');if(g)g.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)};
+  });
 }
 window.STT_OPEN_AREA_SELECTOR=openSelector;
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const u=ua(),a=aa();if(!u)return;openSelector({is_admin:u==='ALL',area_id:u,area_ids:AREAS,user_token:get(K.T)})}
 function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!aa())return;let b=document.getElementById('sttAreaBadgeV15');if(!b){b=document.createElement('span');b.id='sttAreaBadgeV15';t.appendChild(b)}b.textContent=aa()==='ALL'?'ALL AREA':aa().replace('_',' ')}catch(e){}}
 const of=window.fetch;
-if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V15){window.__STT_MULTI_AREA_FETCH_V15=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token){set(K.T,j.user_token);if(j.area_id)set(K.U,j.area_id);if(j.is_admin)set(K.U,'ALL')}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
+if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V17){window.__STT_MULTI_AREA_FETCH_V17=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.area_id&&j.status==='allowed')set(K.U,j.area_id);if(j&&j.status==='allowed'&&!bool(j.is_admin)&&j.area_id!=='ALL')del('STT_ADMIN_BYPASS_V1');if(j&&bool(j.is_admin))set(K.U,'ALL')}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
 function clear(){del(K.T);del(K.U);del(K.A);del('STT_ADMIN_BYPASS_V1')}
 function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){const old=window.STT_USER_ACCESS.logout;window.STT_USER_ACCESS.logout=function(){clear();if(typeof old==='function')old()};window.STT_USER_ACCESS.__MA=1}}catch(e){}}
 function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&ua()&&!aa())gate();else if(c&&c.u&&ua()&&aa())badge();adminCrud()}
