@@ -1668,7 +1668,7 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
           <button id="addAreaCameraBtn" class="btn btn-ghost stt23-add-btn" type="button">
             <i class="fas fa-map-marked-alt"></i> PILIH AREA PATROLI
           </button>
-          <div id="stt23AreaCounter" class="stt23-counter">0 TITIK AREA TERPASANG</div>
+          <div id="stt23AreaCounter" class="stt23-counter">0 TITIK DIPILIH</div>
           <div class="small" style="margin-top:8px">Pilih area yang akan dipatroli. Template bawaan hanya sebagai pilihan awal. <strong>Custom Area tidak dibatasi jumlahnya</strong> dan nama area dapat dibuat sesuai kebutuhan lapangan. <strong>FINDING NOTES dikelola di halaman terpisah</strong>.</div>
         </div>
 
@@ -1680,6 +1680,7 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
                 <div id="stt23PickerTitle" class="stt23-picker-title">📍 PILIH AREA PATROLI</div>
                 <div class="small">Pilih area mana saja. Area yang sudah dibuat akan ditandai.</div>
               </div>
+              <button type="button" id="stt23PickerSwitchArea" class="btn btn-ghost" style="display:none">🔄 GANTI AREA</button>
               <button type="button" id="stt23PickerClose" class="btn btn-ghost stt23-picker-close">✕</button>
             </div>
             <div class="stt23-picker-tools">
@@ -1919,7 +1920,7 @@ const DEFAULT_LOGO_LEFT_URL = DEFAULT_LOGO_URL;
 const DEFAULT_LOGO_RIGHT_URL = DEFAULT_LOGO_URL;
 // ===== GAS CONFIG — GANTI URL GAS DI SINI SAJA =====
 // Semua fungsi backend (ADMIN, PDF upload, Finding Central) memakai URL ini.
-const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbwe8JbKVuKlVR_Da-fivzTSnczfJzU_hLIEqYvvN2aOq3aeksJcuUs071ZLF7gTofd--Q/exec"],CREATED_BY="Mbah Pri";
+const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbx444U3NRZZ6uMAQAsroavrGUF3a_wp7XwreNWlf5EwXZiMJtKnlELfOwu9UbRJFyn4GA/exec"],CREATED_BY="Mbah Pri";
 const ADMIN_AUTH_ENDPOINT = GAS_API_ENDPOINTS[0];
 const PDF_UPLOAD_URL = GAS_API_ENDPOINTS[0];
 const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
@@ -1927,7 +1928,7 @@ const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
 const GOOGLE_DRIVE_FOLDER_ID = "1G28FlBrRC81QRAUQpQB1L1HUssxiYL8N";
 
 
-// ===== STT V29 RESPONSE + MULTI-AREA HARDENING =====
+// ===== STT V30 RESPONSE + MULTI-AREA HARDENING =====
 async function sttReadJson(response, context='CENTRAL'){
   const text=await response.text();
   const raw=String(text||'').trim();
@@ -2827,15 +2828,10 @@ function setupSuperCleanup() {
   })();
 
   // ==================== APPLICATION STATE ====================
+  // V30: patrol data is strictly scoped to the currently selected Area A/B.
+  // Do NOT bootstrap from the legacy global patrol_meta_v1 because that key can
+  // contain mixed Area A + Area B records (the old cause of 33 points in Area A).
   let patrolData = {};
-  try{
-    const rawPatrolMeta = localStorage.getItem('patrol_meta_v1');
-    if(rawPatrolMeta) patrolData = JSON.parse(rawPatrolMeta) || {};
-  }catch(err){
-    console.warn('[Patrolistt] patrol metadata corrupted/unavailable; starting safely.', err);
-    patrolData = {};
-  }
-  if(!patrolData || typeof patrolData !== 'object' || Array.isArray(patrolData)) patrolData = {};
   let logoData = localStorage.getItem('patrol_logo_left_v1') || localStorage.getItem('patrol_logo_v1') || DEFAULT_LOGO_LEFT_URL;
   let logoDataRight = localStorage.getItem('patrol_logo_right_v1') || localStorage.getItem('patrol_logo_v1') || DEFAULT_LOGO_RIGHT_URL;
   let companyIdentity = {};
@@ -2879,11 +2875,10 @@ function setupSuperCleanup() {
       const payload = JSON.stringify(patrolData);
       // Keep localStorage only for small metadata. Photos are already handled
       // separately; if quota is exhausted, do not crash the application.
-      localStorage.setItem('patrol_meta_v1', payload);
-      try{
-        const active=(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').trim().toUpperCase();
-        if(active==='AREA_A'||active==='AREA_B') localStorage.setItem('patrol_meta_v1_'+active,payload);
-      }catch(_){}
+      const active=(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').trim().toUpperCase();
+      if(active==='AREA_A'||active==='AREA_B') {
+        localStorage.setItem('patrol_meta_v1_'+active, payload);
+      }
       return true;
     }catch(err){
       console.warn('[Patrolistt] localStorage quota/error:', err);
@@ -3444,6 +3439,8 @@ function setupSuperCleanup() {
 
     // Flow PATROLI: klik tombol -> pilih AREA A/B -> baru pilih titik/template.
     document.getElementById('addAreaCameraBtn')?.addEventListener('click', () => {
+      const actNow=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+      if(actNow==='AREA_A'||actNow==='AREA_B'){ open23AreaPicker(); return; }
       const token=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
       const allowedRaw=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
       const assigned=allowedRaw.split(',').map(x=>String(x).trim().toUpperCase()).filter(x=>x==='AREA_A'||x==='AREA_B');
@@ -3461,7 +3458,7 @@ function setupSuperCleanup() {
     document.getElementById('stt23PickerRandom')?.addEventListener('click',async()=>{
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
       const custom=await loadBackendCustomTemplates_(active);
-      const templates=getAreaPickerTemplates_(active,custom),used=getUsed23TemplateIds(),available=templates.filter(t=>!used.has(String(t.id)));
+      const templates=getAreaPickerTemplates_(active,custom),used=getUsedTemplateIdsForActiveArea_(),available=templates.filter(t=>!used.has(String(t.id)));
       if(!available.length){alert('ℹ️ Semua titik yang tersedia sudah dipilih.');return;}
       // Randomizes the LOCATION/PATROL POINT, not the checklist/template content.
       const pick=available[Math.floor(Math.random()*available.length)];
@@ -3914,8 +3911,20 @@ function setupSuperCleanup() {
 
   // ==================== AREA MANAGEMENT ====================
     // ==================== AREA PICKER — TEMPLATE + CUSTOM TANPA BATAS ====================
-    function getUsed23TemplateIds(){
-      return new Set(Object.values(patrolData || {}).map(a=>String(a?.templateId||'')).filter(Boolean));
+    function getUsedAreaATemplateIds(){
+      return new Set(Object.values(patrolData || {}).map(a=>String(a?.templateId||'')).filter(t=>/^STT-A\d+$/i.test(t)));
+    }
+    function getUsedAreaBTemplateIds(){
+      return new Set(Object.values(patrolData || {}).map(a=>String(a?.templateId||'')).filter(t=>/^STT-B\d+$/i.test(t)));
+    }
+    function getUsedCustomTemplateIds(){
+      return new Set(Object.values(patrolData || {}).map(a=>String(a?.templateId||'')).filter(t=>t&&!/^STT-[AB]\d+$/i.test(t)));
+    }
+    function getUsedTemplateIdsForActiveArea_(){
+      const act=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+      const s=act==='AREA_B'?getUsedAreaBTemplateIds():getUsedAreaATemplateIds();
+      getUsedCustomTemplateIds().forEach(x=>s.add(x));
+      return s;
     }
 
     function close23AreaPicker(){
@@ -3946,8 +3955,9 @@ function setupSuperCleanup() {
     async function render23AreaPicker(filter=''){
       const list=document.getElementById('stt23PickerList'); if(!list)return;
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
+      if(active!=='AREA_A'&&active!=='AREA_B'){list.innerHTML='<div class="stt23-picker-empty">Pilih AREA A atau AREA B (bukan ALL) untuk memilih titik.</div>';return;}
       const custom=await loadBackendCustomTemplates_(active);
-      const templates=getAreaPickerTemplates_(active,custom),used=getUsed23TemplateIds(),q=String(filter||'').trim().toUpperCase();
+      const templates=getAreaPickerTemplates_(active,custom),used=getUsedTemplateIdsForActiveArea_(),q=String(filter||'').trim().toUpperCase();
       const visible=templates.filter(t=>!q||String(t.name||'').toUpperCase().includes(q)||String(t.order??'').includes(q));
       const done=templates.filter(t=>used.has(String(t.id))).length;
       let html='<div class="stt23-picker-summary"><span class="done">✓ '+done+' SUDAH DIPILIH</span><span>□ '+Math.max(0,templates.length-done)+' BELUM DIPILIH</span><span>📍 '+(active==='AREA_B'?'10':'23')+' TITIK TEMPLATE DASAR</span></div>';
@@ -3971,10 +3981,18 @@ function setupSuperCleanup() {
       const checks=document.getElementById('sttCustomAreaChecks');
       if(search)search.value=''; if(name)name.value=''; if(checks)checks.value='';
       modal.classList.add('open');modal.setAttribute('aria-hidden','false');
+      const sw=document.getElementById('stt23PickerSwitchArea');
+      if(sw){
+        const al=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'').split(',').map(x=>x.trim().toUpperCase()).filter(x=>x==='AREA_A'||x==='AREA_B');
+        const adm=String(localStorage.getItem('STT_USER_AREA_V1')||'').toUpperCase()==='ALL'||!!window.adminUnlocked||!!window.adminBypass;
+        sw.style.display=(adm||al.length>1)?'':'none';
+        sw.onclick=()=>{close23AreaPicker();if(typeof window.STT_OPEN_AREA_SELECTOR==='function')window.STT_OPEN_AREA_SELECTOR({is_admin:adm,area_ids:adm?['AREA_A','AREA_B']:al,user_token:String(localStorage.getItem('STT_USER_TOKEN_V1')||''),openPointPicker:true});};
+      }
       const list=document.getElementById('stt23PickerList'); if(list)list.innerHTML='<div class="stt23-picker-empty">⏳ MEMUAT TITIK AREA...</div>';
       await render23AreaPicker('');
       setTimeout(()=>name?.focus(),80); return true;
     }
+    window.open23AreaPicker=open23AreaPicker;
     function nextAreaId(){
       const keys=Object.keys(patrolData||{}).map(k=>parseInt(k,10)).filter(Number.isFinite);
       return keys.length?Math.max(...keys)+1:0;
@@ -4008,88 +4026,91 @@ function setupSuperCleanup() {
       const custom=Array.isArray(window.STT_BACKEND_CUSTOM_TEMPLATES?.[active])?window.STT_BACKEND_CUSTOM_TEMPLATES[active]:[];
       const templates=getAreaPickerTemplates_(active,custom),template=templates.find(t=>String(t.id)===String(templateId));
       if(!template)return false;
-      const used=getUsed23TemplateIds(); if(used.has(String(template.id))){return false;}
+      if(active!=='AREA_A'&&active!=='AREA_B'){alert('⚠️ Pilih Area A atau Area B terlebih dahulu.');return false;}
+      if(/^STT-[AB]\d+$/i.test(String(template.id))&&String(template.id).toUpperCase().charAt(4)!==(active==='AREA_B'?'B':'A'))return false;
+      const used=getUsedTemplateIdsForActiveArea_(); if(used.has(String(template.id))){return false;}
       const id=nextAreaId(),displayName=String(template.name||'').toUpperCase();
       patrolData[id]={name:displayName,templateId:template.id,templateOrder:template.order??null,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now(),customArea:!!template.customArea,customChecks:Array.isArray(template.checks)?template.checks.slice():[]};
       persistMeta();renderAreas();try{window.dispatchEvent(new Event('stt-patrol-data-changed'))}catch(_){} currentTargetArea=String(id);updateAreaSelector();const selector=document.getElementById('targetAreaSelect');if(selector)selector.value=currentTargetArea;update23AreaCounter();close23AreaPicker();
       return true;
     }
     function update23AreaCounter(){
-      const n=Object.keys(patrolData||{}).length;
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
+      const n=active==='AREA_B'?getUsedAreaBTemplateIds().size:getUsedAreaATemplateIds().size;
       const base=(active==='AREA_B'&&window.STT_AREA_B_MASTER)?window.STT_AREA_B_MASTER.templates.length:((window.STT_FIXED_23_AREA_TEMPLATES||[]).length||23);
       const el=document.getElementById('stt23AreaCounter');
       const btn=document.getElementById('addAreaCameraBtn');
-      if(el)el.textContent=`${n} / ${base} TITIK AREA TERPASANG`;
+      if(el)el.textContent=`${n} / ${base} TITIK DIPILIH`;
       if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-map-marked-alt"></i> PILIH AREA PATROLI';}
     }
 
     document.getElementById('sttCustomAreaAddBtn')?.addEventListener('click',addCustomArea);
     document.getElementById('sttPickerCustomAreaAddBtn')?.addEventListener('click',addCustomArea);
-    document.getElementById('stt23PickerSearch')?.addEventListener('input',e=>render23AreaPicker(e.target.value));
-    document.getElementById('stt23PickerClose')?.addEventListener('click',close23AreaPicker);
-    document.getElementById('stt23AreaPicker')?.addEventListener('click',e=>{if(e.target?.id==='stt23AreaPicker')close23AreaPicker();});
 
-    // V29 AUTO-SEED: Area A starts with all 23 built-in patrol points;
-    // Area B starts with all 10 built-in patrol points. Existing data is never overwritten.
-    function seedDefaultPatrolPointsForArea_(active){
+    // V30 MANUAL POINT SELECTION — NO AUTO-SEED
+    // Area A has 23 available built-in points; Area B has 10.
+    // A point is added to the patrol session ONLY after the user explicitly
+    // selects it from the picker. This restores the original one-by-one flow.
+    function migrateLegacyMixedAreaData_(active){
       active=String(active||'').toUpperCase();
-      const templates=(active==='AREA_B'&&window.STT_AREA_B_MASTER)
-        ? window.STT_AREA_B_MASTER.templates
-        : (window.STT_FIXED_23_AREA_TEMPLATES||[]);
-      if(!Array.isArray(templates)||!templates.length)return false;
-      const seedKey='STT_DEFAULT_POINTS_SEEDED_V29_'+active;
-      let seeded=false;
-      try{ seeded=localStorage.getItem(seedKey)==='1'; }catch(_){ seeded=false; }
+      if(active!=='AREA_A'&&active!=='AREA_B')return false;
+      const scopedKey='patrol_meta_v1_'+active;
+      let scoped=null, legacy=null;
+      try{
+        const sr=localStorage.getItem(scopedKey);
+        if(sr!==null) scoped=JSON.parse(sr)||{};
+        const lr=localStorage.getItem('patrol_meta_v1');
+        if(lr!==null) legacy=JSON.parse(lr)||{};
+      }catch(_){ scoped=null; legacy=null; }
+      if(scoped && typeof scoped==='object' && !Array.isArray(scoped)) return false;
+      if(!legacy || typeof legacy!=='object' || Array.isArray(legacy)) return false;
 
-      const current=patrolData&&typeof patrolData==='object'&&!Array.isArray(patrolData)?patrolData:{};
-      const byTemplate=new Set(Object.values(current).map(a=>String(a?.templateId||'')).filter(Boolean));
-      const hasAny=Object.keys(current).length>0;
-
-      // First run: install every built-in point. If there is already partial data,
-      // add only missing built-ins so photos/notes/custom points are preserved.
-      let changed=false;
-      if(!seeded || !hasAny){
-        const keys=Object.keys(current).map(k=>parseInt(k,10)).filter(Number.isFinite);
-        let next=keys.length?Math.max(...keys)+1:0;
-        for(const t of templates){
-          const tid=String(t.id||'');
-          if(!tid || byTemplate.has(tid))continue;
-          current[String(next++)]={
-            name:String(t.name||'').toUpperCase(),
-            templateId:tid,
-            templateOrder:t.order,
-            notes:'',
-            globalDescription:'',
-            patrolStatus:'AMAN TERKENDALI',
-            photos:[],
-            descriptions:[],
-            descriptionFlags:[],
-            timestamp:Date.now()
-          };
-          byTemplate.add(tid); changed=true;
-        }
+      const out={}; const quarantine=[]; let next=0, changed=false;
+      const vals=Object.values(legacy);
+      for(const a of vals){
+        if(!a || typeof a!=='object')continue;
+        const tid=String(a.templateId||'').toUpperCase();
+        const isA=tid.startsWith('STT-A');
+        const isB=tid.startsWith('STT-B');
+        if((active==='AREA_A'&&isB)||(active==='AREA_B'&&isA)) { changed=true; continue; }
+        // Record ambigu (tanpa templateId STT-Axx/STT-Bxx): JANGAN masuk A/B.
+        // Disimpan aman di karantina (data tidak dihapus).
+        if(!isA&&!isB){ quarantine.push(a); changed=true; continue; }
+        const copy=Object.assign({},a);
+        const pristine=(!copy.notes && !copy.globalDescription &&
+          (!Array.isArray(copy.photos)||copy.photos.length===0) &&
+          (!Array.isArray(copy.descriptions)||copy.descriptions.length===0));
+        // Remove ONLY untouched V30 auto-seeded built-ins. Real patrol data stays.
+        if(pristine && ((active==='AREA_A'&&isA)||(active==='AREA_B'&&isB))){ changed=true; continue; }
+        out[String(next++)]=copy;
       }
-      if(changed) patrolData=current;
-      try{localStorage.setItem(seedKey,'1')}catch(_){ }
-      if(changed) persistMeta();
-      return changed;
+      try{
+        if(quarantine.length){
+          let q=[]; try{q=JSON.parse(localStorage.getItem('patrol_meta_v1_AMBIGUOUS')||'[]')||[];}catch(_){q=[];}
+          const seen=new Set(q.map(x=>JSON.stringify(x)));
+          quarantine.forEach(x=>{const s=JSON.stringify(x); if(!seen.has(s)){seen.add(s);q.push(x);}});
+          localStorage.setItem('patrol_meta_v1_AMBIGUOUS',JSON.stringify(q));
+        }
+      }catch(_){}
+      try{localStorage.setItem(scopedKey,JSON.stringify(out));}catch(_){}
+      return changed || Object.keys(out).length!==vals.length;
     }
 
     function reloadPatrolDataForActiveArea(){
       try{
+        currentTargetArea=null;
         const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
         if(active!=='AREA_A'&&active!=='AREA_B'){
           patrolData={}; renderAreas(); updateAreaSelector(); update23AreaCounter(); return;
         }
+        // One-time safety migration: split the old mixed global store so Area A
+        // can never inherit Area B points (and vice versa).
+        migrateLegacyMixedAreaData_(active);
         const raw=localStorage.getItem('patrol_meta_v1_'+active);
         patrolData=raw?JSON.parse(raw)||{}:{};
         if(!patrolData||typeof patrolData!=='object'||Array.isArray(patrolData))patrolData={};
 
-        // IMPORTANT: do not delete old auto-seeded data and do not overwrite
-        // existing photos, notes, custom points, or edits. Only fill missing defaults.
-        seedDefaultPatrolPointsForArea_(active);
-
+        // NO AUTO-SEED. The 23/10 templates are choices, not installed points.
         renderAreas(); updateAreaSelector(); update23AreaCounter();
       }catch(e){console.warn('[AREA DATA RELOAD]',e);patrolData={};renderAreas();}
     }
@@ -5772,7 +5793,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V28 FINAL SESSION/TEMPLATE FIX ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V30 FINAL MANUAL POINT SELECTION ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5784,16 +5805,15 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #sttAreaBadgeV15{display:inline-flex;align-items:center;gap:7px;margin-left:10px;padding:5px 10px;border-radius:999px;background:#eaf2ff;color:#164e8a;font-size:11px;font-weight:900}
 @media(max-width:560px){#sttAreaGateV15 .stt-area-grid{grid-template-columns:1fr}#sttAreaGateV15 .stt-area-btn.all{grid-column:auto}}
 </style>
-<script id="STT_MULTI_AREA_ACCESS_V29">
+<script id="STT_MULTI_AREA_ACCESS_V30">
 (function(){'use strict';
-const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',P:'STT_ALLOWED_AREAS_V1',M:'patrol_meta_v1'}, AREAS=['AREA_A','AREA_B'];
+const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',P:'STT_ALLOWED_AREAS_V1'}, AREAS=['AREA_A','AREA_B'];
 const n=v=>{const s=String(v??'').trim().toUpperCase().replace(/[\s-]+/g,'_');return s==='ALL'?'ALL':(AREAS.includes(s)?s:'')};
 const bool=v=>v===true||v===1||['true','1','yes'].includes(String(v??'').trim().toLowerCase());
 const get=k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set=(k,v)=>{try{localStorage.setItem(k,String(v))}catch(e){}},del=k=>{try{localStorage.removeItem(k)}catch(e){}};
 function areas(v){let a=[];if(Array.isArray(v))a=v;else if(typeof v==='string'&&v.trim())a=v.split(/[,|\s]+/);a=a.map(n).filter(x=>AREAS.includes(x));return [...new Set(a)];}
 const ua=()=>n(get(K.U)),aa=()=>n(get(K.A)), allowed=()=>areas(get(K.P));
 function saveAllowed(a){a=areas(a);set(K.P,a.join(','));if(a.length===1)set(K.U,a[0]);else if(a.length>1)set(K.U,'MULTI');}
-function swap(a){a=n(a);if(!a)return;try{let sc=localStorage.getItem(K.M+'_'+a);if(sc===null&&a==='AREA_A'){const legacy=localStorage.getItem(K.M);if(legacy!==null){localStorage.setItem(K.M+'_'+a,legacy);sc=legacy}}if(sc!==null)localStorage.setItem(K.M,sc);else localStorage.removeItem(K.M)}catch(e){console.warn('[AREA SWAP]',e)}}
 function showAreaError(d,msg){try{let e=document.getElementById('sttAreaGateMsg');if(!e){e=document.createElement('div');e.id='sttAreaGateMsg';e.style.cssText='margin-top:12px;padding:10px;border-radius:10px;background:#fff1f2;color:#b42318;font-weight:800;font-size:13px';d.querySelector('.stt-area-card')?.appendChild(e)}e.textContent=msg}catch(_){} }
 async function validateArea(a){
   const token=get(K.T);if(!token)return {ok:false,message:'Sesi login tidak ditemukan. Silakan login ulang.'};
@@ -5811,11 +5831,11 @@ function openSelector(info){
   const all=admin?'<button class="stt-area-btn all" data-a="ALL">🌐 ALL AREA — ADMIN</button>':'';
   d.innerHTML='<div class="stt-area-card"><h2>📍 PILIH AREA KERJA</h2><p>Pilih area yang akan digunakan untuk sesi patroli ini. User yang memiliki akses lebih dari satu area dapat berpindah Area A ↔ Area B kapan saja.</p><div class="stt-area-grid">'+buttons+all+'</div></div>';
   document.body.appendChild(d);
-  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{const a=n(b.dataset.a);if(!a)return;d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';const vr=await validateArea(a);if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+a.replace('_',' ');showAreaError(d,'❌ '+vr.message);return;}set(K.A,a);if(a!=='ALL')swap(a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){}d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)};if(info?.openPointPicker){setTimeout(()=>{try{if(typeof open23AreaPicker==='function')open23AreaPicker()}catch(e){console.warn('[POINT PICKER]',e)}},120)}});
+  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{const a=n(b.dataset.a);if(!a)return;d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';const vr=await validateArea(a);if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+a.replace('_',' ');showAreaError(d,'❌ '+vr.message);return;}set(K.A,a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){}d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)};if(a!=='ALL'&&info?.openPointPicker!==false){setTimeout(()=>{try{if(typeof window.open23AreaPicker==='function')window.open23AreaPicker()}catch(e){console.warn('[POINT PICKER]',e)}},120)}});
 }
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const a=allowed();const isAdmin=ua()==='ALL';if(!isAdmin&&!a.length)return;openSelector({is_admin:isAdmin,area_id:a[0]||'ALL',area_ids:isAdmin?AREAS:a,user_token:get(K.T)})}
 function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!aa())return;let b=document.getElementById('sttAreaBadgeV15');if(!b){b=document.createElement('span');b.id='sttAreaBadgeV15';t.appendChild(b)}b.textContent=aa()==='ALL'?'ALL AREA':aa().replace('_',' ')}catch(e){}}
-const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V28){window.__STT_MULTI_AREA_FETCH_V28=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
+const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V30){window.__STT_MULTI_AREA_FETCH_V30=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
 function clear(){del(K.T);del(K.U);del(K.A);del(K.P);del('STT_ADMIN_BYPASS_V1');del('STT_ADMIN_SESSION_V1');del('STT_USER_CREDS_V1')}
 function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){const old=window.STT_USER_ACCESS.logout;window.STT_USER_ACCESS.logout=function(){clear();if(typeof old==='function')old()};window.STT_USER_ACCESS.__MA=1}}catch(e){}}
 function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
