@@ -1154,7 +1154,7 @@ header .subtitle{font-size:1rem}
 .tab{padding:12px 8px;font-size:13px}
 .help-btn{z-index:8000}
 
-/* V24: CLEAN MAIN SCREEN — patrol workflow only */
+/* V25: CLEAN MAIN SCREEN — patrol workflow only */
 .tabs{display:none !important;}
 .menu-only-section{display:none !important;}
 .menu-only-section.menu-section-open{display:block !important;}
@@ -1271,7 +1271,7 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 .stt23-complete{margin-top:10px;padding:11px 13px;border-radius:12px;background:#f0fdf4;color:#166534;font-weight:800;font-size:13px}
 .stt23-authority{background:#eff6ff!important;color:#1e3a8a!important;border-left:5px solid #2563eb}.stt23-auto-caption{background:#f8fafc!important;color:#0f172a!important;border:1px solid #dbeafe}.stt-photo-desc.is-finding{border:3px solid #dc2626!important;background:#fee2e2!important;color:#991b1b!important;font-weight:900!important;font-size:20px!important}.stt23-picker-item{position:relative}.stt23-picker-check{width:34px;height:34px;border-radius:10px;border:2px solid #94a3b8;display:inline-flex;align-items:center;justify-content:center;background:#fff;font-size:21px;font-weight:950;flex:0 0 34px}.stt23-picker-item[data-used="true"] .stt23-picker-check{border-color:#16a34a;background:#dcfce7;color:#166534}.stt23-picker-item[data-used="false"] .stt23-picker-check{color:#64748b}.stt23-picker-badge{white-space:nowrap}.stt23-picker-item:disabled{opacity:.9;cursor:default}.stt23-picker-summary{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.stt23-picker-summary span{padding:7px 10px;border-radius:999px;font-size:12px;font-weight:900;background:#f1f5f9;color:#334155}.stt23-picker-summary .done{background:#dcfce7;color:#166534}@media(max-width:680px){.stt23-add-btn{font-size:16px!important}.stt23-template{padding:13px}.stt23-checks{font-size:13px}}
 </style>
-<meta name="stt-build" content="V24-FINAL-2026-10-01-ADMIN-SESSION-MULTIAREA-HARDENED">
+<meta name="stt-build" content="V25-FINAL-2026-10-01-ADMIN-SESSION-MULTIAREA-HARDENED">
 </head>
 <body>
 
@@ -1947,8 +1947,40 @@ async function sttReadJson(response, context='CENTRAL'){
 const DEFAULT_PATROL_DESCRIPTION = 'Kegiatan patroli area tersebut telah selesai dilaksanakan dengan hasil situasi terpantau terkendali aman dan kondusif, temuan menonjol serta kendala operasional nihil';
 
 // DEFAULT CAPTION PER AREA: jika petugas tidak menulis keterangan foto, gunakan template area yang sesuai.
+/* ==================== AREA B MASTER TEMPLATE V3 ====================
+   Source-derived 10 Area B points.
+*/
+(function(){
+  const B=[
+    {id:'STT-B01',order:1,name:'CUP WEST',descriptionTemplate:'SITUASI AREA AMAN KONDUSIF\nPAGAR PARIMETER MASIH TERPANTAU AMAN\nAREA ELECTRICAL GENTRY JKT2 AMAN\nAKTIVITAS DARI PARA PEKERJA NIHIL'},
+    {id:'STT-B02',order:2,name:'CUB EAST',descriptionTemplate:'SITUASI AREA AMAN KONDUSIF\nAKTIVITAS DARI PARA PEKERJA NIHIL'},
+    {id:'STT-B03',order:3,name:'EXTERNAL PERIMETER SOUTH JKT 2',descriptionTemplate:'SITUASI AREA AMAN KONDUSIF\nPAGAR PEMBATAS MASIH TERPANTAU AMAN\nPINTU2 TERTUTUP RAPAT\nALAT MATERIAL DARI PT. SBCK MASIH STANDBY\nAKTIVITAS PEKERJA BERJALAN KONDUSIF'},
+    {id:'STT-B04',order:4,name:'EXTERNAL PARAMETER EAST',descriptionTemplate:'SITUASI AREA MASIH AMAN KONDUSIF\nGERBANG TIMUR TERTUTUP RAPAT\nPAGAR PARAMETER MASIH AMAN KONDUSIF\nAREA ELECTRICAL GENTRY JKT2 AMAN\nBOX HYDRANT DALAM KONDISI LENGKAP DAN BAIK\nAKTIVITAS NIHIL'},
+    {id:'STT-B05',order:5,name:'PARIMETER WEST GARDEN',descriptionTemplate:'SITUASI AREA AMAN KONDUSIF\nBOX HYDRANT MASIH DALAM PENGERJAAN\nAKTIVITAS PEKERJA NIHIL'},
+    {id:'STT-B06',order:6,name:'LOADING DOCK JKT2',descriptionTemplate:'SITUASI AREA MASIH AMAN KONDUSIF\nAKTIVITAS PARA PEKERJA NIHIL'},
+    {id:'STT-B07',order:7,name:'FOH GF JKT2',descriptionTemplate:'SITUASI AREA MASIH AMAN KONDUSIF\nAREA TOILET AMAN TKA\nAREA PASSENGER LIFT, SICK BAY ROOM, LOCKER ROOM MASIH AMAN\nAKTIVITAS DARI PARA PEKERJA NIHIL'},
+    {id:'STT-B08',order:8,name:'FOH 1 FLOR JKT2',descriptionTemplate:'SITUASI AREA AMAN KONDUSIF\nAREA ELV QIA ROOM AMAN TKA, BOX HYDRANT & APAR DALAM KONDISI LENGKAP & BAIK\nAREA CARGO LIFT LOBBY LT. 1, ROOM CUSTOMER 1, & ROOM ICCT RISER LT. 1 AMAN TKA\nBOX HYDRANT DAN APAR KONDISI LENGKAP & BAIK\nAKTIVITAS NIHIL'},
+    {id:'STT-B09',order:9,name:'CORRIDOR GF JKT 2',descriptionTemplate:'SITUASI AREA AMAN KONDUSIF\nAREA SERVER ROOM A & B AMAN\nAREA ICCT RISER, CARGO LIFT LOBBY, PASSENGER LIFT AMAN TKA\nAKTIVITAS NIHIL'},
+    {id:'STT-B10',order:10,name:'HVSS',descriptionTemplate:'SITUASI AREA AMAN KONDUSIF, PETUGAS HVSS STANDBY\nPINTU GERBANG BELAKANG DAN PAGAR PARIMETER MASIH TERPANTAU AMAN\nKONDISI BOX HYDRANT LENGKAP DAN BAIK\nAREA TRAFO DUTY 1 & TRAFO SWING MASIH AMAN KONDUSIF'}
+  ].map(x=>Object.assign({checks:String(x.descriptionTemplate).split(/\r?\n/).filter(Boolean)},x));
+  const CK='STT_AREA_B_CUSTOM_V2',RK='STT_AREA_B_RENAME_V2';
+  const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||'null')||d}catch(_){return d}};
+  const write=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}};
+  const config=()=>read(RK,{area:'AREA B',points:{}});
+  const all=()=>B.concat(read(CK,[]));
+  window.STT_AREA_B_MASTER={templates:B,all,read,write,config,areaName:()=>String(config().area||'AREA B').toUpperCase()};
+})();
+
 function getAreaTemplateForPatrol(area){
   try{
+    if(String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase()==='AREA_B' && window.STT_AREA_B_MASTER){
+      const list=window.STT_AREA_B_MASTER.all();
+      const byId=list.find(t=>String(t.id)===String(area?.templateId));
+      if(byId)return byId;
+      const target=String(area?.name||'').trim().replace(/\s+/g,' ').toUpperCase();
+      const byName=list.find(t=>String(t.name||'').trim().replace(/\s+/g,' ').toUpperCase()===target);
+      if(byName)return byName;
+    }
     const api=window.STT_AREA_TEMPLATES;
     if(api && typeof api.find==='function'){
       // Primary: exact template ID.
@@ -3880,34 +3912,25 @@ function setupSuperCleanup() {
     }
 
     function render23AreaPicker(filter=''){
-      const list=document.getElementById('stt23PickerList');
-      if(!list)return;
-      const templates=window.STT_FIXED_23_AREA_TEMPLATES||[];
-      const used=getUsed23TemplateIds();
-      const q=String(filter||'').trim().toUpperCase();
-      const visible=templates.filter(t=>!q||String(t.name).toUpperCase().includes(q)||String(t.order).includes(q));
-      const customCount=Object.values(patrolData||{}).filter(a=>String(a?.templateId||'').startsWith('CUSTOM_')).length;
-      const totalCount=Object.keys(patrolData||{}).length;
-      let html='<div class="stt23-picker-summary"><span class="done">✓ '+totalCount+' AREA TERPASANG</span><span>Custom: '+customCount+'</span></div>';
-      if(!visible.length){
-        html+='<div class="stt23-picker-empty">TEMPLATE TIDAK DITEMUKAN. GUNAKAN FORM CUSTOM AREA DI ATAS.</div>';
-      }else{
-        html+=visible.map(t=>{
-          const isUsed=used.has(String(t.id));
-          return `<button type="button" class="stt23-picker-item" data-template-id="${String(t.id).replace(/"/g,'&quot;')}" data-used="${isUsed?'true':'false'}" ${isUsed?'disabled':''}>
-            <span class="stt23-picker-check" aria-label="${isUsed?'Sudah dipilih':'Belum dipilih'}">${isUsed?'✓':'□'}</span>
-            <span class="stt23-picker-num">${t.order}</span>
-            <span class="stt23-picker-name">${String(t.name).toUpperCase()}</span>
-            ${isUsed?'<span class="stt23-picker-badge">SUDAH DIPILIH</span>':'<span class="stt23-picker-badge" style="color:#164e8a;background:#eaf2ff">TEMPLATE</span>'}
-          </button>`;
-        }).join('');
+      const list=document.getElementById('stt23PickerList'); if(!list)return;
+      const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
+      if(active==='AREA_B' && window.STT_AREA_B_MASTER){
+        const cfg=window.STT_AREA_B_MASTER.config(),templates=window.STT_AREA_B_MASTER.all(),used=getUsed23TemplateIds();
+        const q=String(filter||'').trim().toUpperCase();
+        const visible=templates.filter(t=>!q||String(cfg.points?.[t.id]||t.name).toUpperCase().includes(q)||String(t.order).includes(q));
+        const done=templates.filter(t=>used.has(String(t.id))).length;
+        let html='<div class="stt23-picker-summary"><span class="done">✓ '+done+' SUDAH DIPILIH</span><span>□ '+Math.max(0,templates.length-done)+' BELUM DIPILIH</span></div>';
+        if(!visible.length)html+='<div class="stt23-picker-empty">TITIK AREA B TIDAK DITEMUKAN.</div>';
+        else html+=visible.map(t=>{const isUsed=used.has(String(t.id)),nm=String(cfg.points?.[t.id]||t.name).toUpperCase();return `<button type="button" class="stt23-picker-item" data-template-id="${t.id}" data-used="${isUsed?'true':'false'}" ${isUsed?'disabled':''}><span class="stt23-picker-check">${isUsed?'✓':'□'}</span><span class="stt23-picker-num">${t.order}</span><span class="stt23-picker-name">${nm}</span><span class="stt23-picker-badge">${isUsed?'SUDAH DIPILIH':'TEMPLATE'}</span></button>`}).join('');
+        list.innerHTML=html; list.querySelectorAll('.stt23-picker-item:not(:disabled)').forEach(b=>b.onclick=()=>addNewArea(b.dataset.templateId));
+        const title=document.getElementById('stt23PickerTitle');if(title)title.textContent='📍 '+String(cfg.area||'AREA B').toUpperCase();
+        return;
       }
-      list.innerHTML=html;
-      list.querySelectorAll('.stt23-picker-item:not(:disabled)').forEach(btn=>{
-        btn.addEventListener('click',()=>{addNewArea(btn.dataset.templateId);});
-      });
+      const templates=window.STT_FIXED_23_AREA_TEMPLATES||[],used=getUsed23TemplateIds(),q=String(filter||'').trim().toUpperCase(),visible=templates.filter(t=>!q||String(t.name).toUpperCase().includes(q)||String(t.order).includes(q)),customCount=Object.values(patrolData||{}).filter(a=>String(a?.templateId||'').startsWith('CUSTOM_')).length,totalCount=Object.keys(patrolData||{}).length;
+      let html='<div class="stt23-picker-summary"><span class="done">✓ '+totalCount+' AREA TERPASANG</span><span>Custom: '+customCount+'</span></div>';
+      if(!visible.length)html+='<div class="stt23-picker-empty">TEMPLATE TIDAK DITEMUKAN. GUNAKAN FORM CUSTOM AREA DI ATAS.</div>';else html+=visible.map(t=>{const isUsed=used.has(String(t.id));return `<button type="button" class="stt23-picker-item" data-template-id="${t.id}" data-used="${isUsed?'true':'false'}" ${isUsed?'disabled':''}><span class="stt23-picker-check">${isUsed?'✓':'□'}</span><span class="stt23-picker-num">${t.order}</span><span class="stt23-picker-name">${String(t.name).toUpperCase()}</span>${isUsed?'<span class="stt23-picker-badge">SUDAH DIPILIH</span>':'<span class="stt23-picker-badge" style="color:#164e8a;background:#eaf2ff">TEMPLATE</span>'}</button>`}).join('');
+      list.innerHTML=html;list.querySelectorAll('.stt23-picker-item:not(:disabled)').forEach(b=>b.onclick=()=>addNewArea(b.dataset.templateId));
     }
-
     function open23AreaPicker(){
       const modal=document.getElementById('stt23AreaPicker');
       if(!modal)return false;
@@ -3948,21 +3971,15 @@ function setupSuperCleanup() {
 
     function addNewArea(templateId){
       if(!templateId)return open23AreaPicker();
-      const templates=window.STT_FIXED_23_AREA_TEMPLATES || [];
-      const template=templates.find(t=>String(t.id)===String(templateId));
-      if(!template)return false;
-      const used=getUsed23TemplateIds();
-      if(used.has(String(template.id))){alert('ℹ️ AREA INI SUDAH DIBUAT. SILAKAN PILIH AREA LAIN.');return false;}
-      const id=nextAreaId();
-      patrolData[id]={name:String(template.name).toUpperCase(),templateId:template.id,templateOrder:template.order,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now(),customArea:false,customChecks:Array.isArray(template.checks)?template.checks.slice():[]};
-      persistMeta();renderAreas();try{window.dispatchEvent(new Event('stt-patrol-data-changed'));}catch(_){}
-      currentTargetArea=String(id);updateAreaSelector();
-      const selector=document.getElementById('targetAreaSelect');if(selector)selector.value=currentTargetArea;
-      update23AreaCounter();close23AreaPicker();
-      alert(`✅ AREA ${template.order} — ${String(template.name).toUpperCase()} DIBUAT.`);
-      return true;
+      const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
+      const templates=(active==='AREA_B'&&window.STT_AREA_B_MASTER)?window.STT_AREA_B_MASTER.all():(window.STT_FIXED_23_AREA_TEMPLATES||[]);
+      const template=templates.find(t=>String(t.id)===String(templateId)); if(!template)return false;
+      const used=getUsed23TemplateIds(); if(used.has(String(template.id))){alert('ℹ️ TITIK INI SUDAH DIBUAT.');return false;}
+      const id=nextAreaId(),cfg=(active==='AREA_B'&&window.STT_AREA_B_MASTER)?window.STT_AREA_B_MASTER.config():null,displayName=String(cfg?.points?.[template.id]||template.name).toUpperCase();
+      patrolData[id]={name:displayName,templateId:template.id,templateOrder:template.order,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now(),customArea:false,customChecks:Array.isArray(template.checks)?template.checks.slice():[]};
+      persistMeta();renderAreas();try{window.dispatchEvent(new Event('stt-patrol-data-changed'))}catch(_){} currentTargetArea=String(id);updateAreaSelector();const selector=document.getElementById('targetAreaSelect');if(selector)selector.value=currentTargetArea;update23AreaCounter();close23AreaPicker();
+      alert(`✅ ${active==='AREA_B'?'TITIK':'AREA'} ${template.order} — ${displayName} DIBUAT.`); return true;
     }
-
     function update23AreaCounter(){
       const n=Object.keys(patrolData||{}).length;
       const el=document.getElementById('stt23AreaCounter');
@@ -3976,6 +3993,28 @@ function setupSuperCleanup() {
     document.getElementById('stt23PickerSearch')?.addEventListener('input',e=>render23AreaPicker(e.target.value));
     document.getElementById('stt23PickerClose')?.addEventListener('click',close23AreaPicker);
     document.getElementById('stt23AreaPicker')?.addEventListener('click',e=>{if(e.target?.id==='stt23AreaPicker')close23AreaPicker();});
+
+    function reloadPatrolDataForActiveArea(){
+      try{
+        const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
+        const raw=localStorage.getItem('patrol_meta_v1_'+active);
+        patrolData=raw?JSON.parse(raw)||{}:{};
+        // First entry into an area gets its fixed patrol template installed automatically.
+        if(Object.keys(patrolData).length===0){
+          const templates=(active==='AREA_B'&&window.STT_AREA_B_MASTER)?window.STT_AREA_B_MASTER.all():(window.STT_FIXED_23_AREA_TEMPLATES||[]);
+          templates.forEach((t,i)=>{
+            patrolData[i]={name:String(t.name).toUpperCase(),templateId:t.id,templateOrder:t.order,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now(),customArea:false,customChecks:Array.isArray(t.checks)?t.checks.slice():[]};
+          });
+          persistMeta();
+        }
+        renderAreas();
+        updateAreaSelector();
+        update23AreaCounter();
+      }catch(e){console.warn('[AREA DATA RELOAD]',e);patrolData={};renderAreas();}
+    }
+    window.STT_RELOAD_ACTIVE_AREA=reloadPatrolDataForActiveArea;
+    window.addEventListener('stt-area-changed',reloadPatrolDataForActiveArea);
+    setTimeout(()=>{try{if(String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase())reloadPatrolDataForActiveArea();}catch(_){ }},250);
 
   // ==================== CLEAN-UP SYSTEM ====================
   function setupAutoCleanup() {
@@ -5646,7 +5685,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V24 FINAL ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V25 AREA-B-FIX ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5685,18 +5724,18 @@ function openSelector(info){
   const all=admin?'<button class="stt-area-btn all" data-a="ALL">🌐 ALL AREA — ADMIN</button>':'';
   d.innerHTML='<div class="stt-area-card"><h2>📍 PILIH AREA KERJA</h2><p>Pilih area yang akan digunakan untuk sesi patroli ini. User yang memiliki akses lebih dari satu area dapat berpindah Area A ↔ Area B kapan saja.</p><div class="stt-area-grid">'+buttons+all+'</div></div>';
   document.body.appendChild(d);
-  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{const a=n(b.dataset.a);if(!a)return;d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';const vr=await validateArea(a);if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+a.replace('_',' ');showAreaError(d,'❌ '+vr.message);return;}set(K.A,a);if(a!=='ALL')swap(a);d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)}});
+  d.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{const a=n(b.dataset.a);if(!a)return;d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';const vr=await validateArea(a);if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+a.replace('_',' ');showAreaError(d,'❌ '+vr.message);return;}set(K.A,a);if(a!=='ALL')swap(a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){}d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)}});
 }
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const a=allowed();const isAdmin=ua()==='ALL';if(!isAdmin&&!a.length)return;openSelector({is_admin:isAdmin,area_id:a[0]||'ALL',area_ids:isAdmin?AREAS:a,user_token:get(K.T)})}
 function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!aa())return;let b=document.getElementById('sttAreaBadgeV15');if(!b){b=document.createElement('span');b.id='sttAreaBadgeV15';t.appendChild(b)}b.textContent=aa()==='ALL'?'ALL AREA':aa().replace('_',' ')}catch(e){}}
-const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V23){window.__STT_MULTI_AREA_FETCH_V23=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
+const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V25){window.__STT_MULTI_AREA_FETCH_V25=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
 function clear(){del(K.T);del(K.U);del(K.A);del(K.P);del('STT_ADMIN_BYPASS_V1')}
 function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){const old=window.STT_USER_ACCESS.logout;window.STT_USER_ACCESS.logout=function(){clear();if(typeof old==='function')old()};window.STT_USER_ACCESS.__MA=1}}catch(e){}}
 function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&!aa())gate();else if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
 function adminCrud(){const box=document.getElementById('sttUserAccessManager');if(!box||box.dataset.ma==='1')return;box.dataset.ma='1';const d=document.createElement('div');d.style.cssText='margin-top:14px;padding:14px;border:2px solid #dbe5f0;border-radius:14px;background:#fbfdff';d.innerHTML='<div style="font-weight:900;color:#0b3d91;margin-bottom:10px">USER MANAGEMENT • MULTI AREA</div><div class="small">User yang sama dapat diberi akses Area A, Area B, atau keduanya.</div>';box.appendChild(d)}
 document.addEventListener('DOMContentLoaded',()=>setTimeout(install,500));setInterval(install,2000);
 window.STT_OPEN_AREA_SELECTOR=openSelector;
-window.STT_AREA_ACCESS_V23={getAllowedAreas:()=>allowed(),openSelector,saveAllowed,clear};
+window.STT_AREA_ACCESS_V25={getAllowedAreas:()=>allowed(),openSelector,saveAllowed,clear};
 })();
 </script>
 
