@@ -1919,7 +1919,7 @@ const DEFAULT_LOGO_LEFT_URL = DEFAULT_LOGO_URL;
 const DEFAULT_LOGO_RIGHT_URL = DEFAULT_LOGO_URL;
 // ===== GAS CONFIG — GANTI URL GAS DI SINI SAJA =====
 // Semua fungsi backend (ADMIN, PDF upload, Finding Central) memakai URL ini.
-const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbxgzkEQkhtx2ELeC7VfqV2KTlyXB7Z2i6ReKil9NmeHrrsiJr2h7bxNg5gUICOQBJfJog/exec"],CREATED_BY="Mbah Pri";
+const GAS_API_ENDPOINTS=["https://script.google.com/macros/s/AKfycbw5UgErXyij54Vy8tzpWpeiaEJiGD_lYoI5rTwT4qvqp-nszwJlPZO4-DcYaDr3TvJUJA/exec"],CREATED_BY="Mbah Pri";
 const ADMIN_AUTH_ENDPOINT = GAS_API_ENDPOINTS[0];
 const PDF_UPLOAD_URL = GAS_API_ENDPOINTS[0];
 const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
@@ -2018,6 +2018,7 @@ function isLegacyGenericDescription(value){
 // Login/change-password are verified by Google Apps Script backend.
 const ADMIN_SESSION_KEY = "stt_admin_session_memory_v1";
 let adminSessionToken = "";
+try{adminSessionToken=localStorage.getItem("STT_ADMIN_SESSION_V1")||"";}catch(e){}
 function getAdminAuthEndpoint(){
   return String(ADMIN_AUTH_ENDPOINT||'').trim().replace(/\/$/,'');
 }
@@ -2041,7 +2042,7 @@ async function adminApi(action, payload={}){
   if(!j || j.status==='error' || j.ok===false) throw new Error(j?.message||j?.error||'ADMIN backend menolak permintaan.');
   return j;
 }
-function clearAdminSession(){adminSessionToken='';}
+function clearAdminSession(){adminSessionToken='';try{localStorage.removeItem('STT_ADMIN_SESSION_V1')}catch(e){}}
 
 // Gallery access is now tied to the server-verified ADMIN session.
 let galleryAccessGranted=false;
@@ -3128,7 +3129,7 @@ function setupSuperCleanup() {
     setMsg('⏳ Menghubungi backend ADMIN...',null);
     try{
       const j=await adminApi('AUTH_ADMIN',{password:value});
-      adminSessionToken=String(j.session_token||'');
+      adminSessionToken=String(j.session_token||j.token||'');
       if(!adminSessionToken) throw new Error('Backend tidak mengembalikan sesi ADMIN.');
       document.getElementById('adminAccessPassword').value='';
       setAdminUi(true);
@@ -5092,8 +5093,8 @@ renderAreas();
   let adminBypass=false;
   try{adminBypass=localStorage.getItem(BYPASS_KEY)==='1'}catch(e){}
 
-  const loadCreds=()=>{try{return JSON.parse(localStorage.getItem(CREDS_KEY)||'null')}catch(e){return null}};
-  const saveCreds=(u,p)=>{try{localStorage.setItem(CREDS_KEY,JSON.stringify({u:u,p:p}))}catch(e){}};
+  const loadCreds=()=>null;
+  const saveCreds=()=>{try{localStorage.removeItem(CREDS_KEY)}catch(e){}};
   const clearCreds=()=>{try{localStorage.removeItem(CREDS_KEY)}catch(e){}};
   const setAdminBypass=(v)=>{adminBypass=!!v;try{v?localStorage.setItem(BYPASS_KEY,'1'):localStorage.removeItem(BYPASS_KEY)}catch(e){}};
 
@@ -5154,9 +5155,9 @@ renderAreas();
     setMsg('⏳ Menghubungi backend ADMIN...');
     try{
       const j=await adminApi('AUTH_ADMIN',{password:pw});
-      adminSessionToken=String(j.session_token||'');
+      adminSessionToken=String(j.session_token||j.token||'');
       if(!adminSessionToken)throw new Error('Backend tidak mengembalikan sesi ADMIN.');
-      try{localStorage.setItem('STT_USER_TOKEN_V1',adminSessionToken);localStorage.setItem('STT_USER_AREA_V1','ALL')}catch(e){}
+      try{localStorage.setItem('STT_USER_TOKEN_V1',adminSessionToken);localStorage.setItem('STT_ADMIN_SESSION_V1',adminSessionToken);localStorage.setItem('STT_USER_AREA_V1','ALL')}catch(e){}
       setAdminBypass(true);
       try{localStorage.setItem('STT_ALLOWED_AREAS_V1','AREA_A,AREA_B');localStorage.removeItem('STT_ACTIVE_AREA_V1');}catch(e){}
       apply('allowed');
@@ -5220,7 +5221,7 @@ renderAreas();
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'USER_LOGIN',username:username,password:password}).toString()});
       const j=await sttReadJson(r);
       if(j&&j.ok!==false&&String(j.status||'').toLowerCase()==='allowed'){
-        saveCreds(username,password);
+        clearCreds();
         try{localStorage.setItem('stt_user_name',username)}catch(e){}
         try{if(j.user_token)localStorage.setItem('STT_USER_TOKEN_V1',String(j.user_token));}catch(e){}
         try{if(j.area_id)localStorage.setItem('STT_USER_AREA_V1',String(j.area_id));}catch(e){}
@@ -5229,6 +5230,7 @@ renderAreas();
         catch(e){}
         try{localStorage.removeItem('STT_ACTIVE_AREA_V1');}catch(e){}
         apply('allowed');
+        setTimeout(()=>{try{if(typeof window.STT_OPEN_AREA_SELECTOR==='function')window.STT_OPEN_AREA_SELECTOR({is_admin:!!j.is_admin,area_id:j.area_id,area_ids:j.area_ids,user_token:j.user_token});}catch(e){}},60);
       }else{
         const m=(j&&(j.message||j.error))||'Login gagal.';
         if(msgEl)msgEl.textContent='❌ '+(m==='USER_BLOCKED'?'Akun ini diblokir ADMIN.':m==='INVALID_PASSWORD'?'Password salah.':m==='USER_NOT_FOUND'?'Username belum terdaftar. Hubungi ADMIN.':m);
@@ -5244,44 +5246,35 @@ renderAreas();
 
   async function checkCentral(showMsg){
     if(checking)return;
-    if(adminBypass){apply('allowed');return;}
-    const creds=loadCreds();
-    if(!creds||!creds.u||!creds.p){apply('guest');return;}
-    if(!CENTRAL){apply('allowed');return;}
-    const savedToken=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
-    const allowedRaw=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
-    const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
-    // V26: if the user already has a saved session/area assignment, do not re-login through the spreadsheet on every page load.
-    // Open the area selector immediately; the selected area is still server-validated before entry.
-    if(savedToken && allowedRaw){
-      const assigned=allowedRaw.split(',').filter(Boolean);
-      // A saved session is enough to unlock the app. Area selection belongs to the Patrol feature, not login.
-      if(!active && assigned.length){ apply('allowed'); return; }
-      if(active && (active==='AREA_A'||active==='AREA_B')){
-        checking=true;
-        try{
-          const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'VALIDATE_AREA',user_token:savedToken,area_id:active}).toString(),cache:'no-store'});
-          const j=await sttReadJson(r);
-          if(j&&j.ok!==false){apply('allowed');return;}
-        }catch(e){}
-        finally{checking=false;}
-        try{localStorage.removeItem('STT_USER_TOKEN_V1');localStorage.removeItem('STT_ALLOWED_AREAS_V1');localStorage.removeItem('STT_ACTIVE_AREA_V1')}catch(e){}
-      }
-    }
+    if(!CENTRAL){apply('guest');return;}
+    const token=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
+    if(!token){clearCreds();setAdminBypass(false);apply('guest');return;}
     checking=true;
     try{
-      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'USER_LOGIN',username:creds.u,password:creds.p}).toString(),cache:'no-store'});
+      const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'VALIDATE_SESSION',user_token:token}).toString(),cache:'no-store'});
       const j=await sttReadJson(r);
-      if(j&&j.ok!==false&&String(j.status||'').toLowerCase()==='allowed'){
-        try{if(j.user_token)localStorage.setItem('STT_USER_TOKEN_V1',String(j.user_token));}catch(e){}
-        try{if(j.area_ids)localStorage.setItem('STT_ALLOWED_AREAS_V1',Array.isArray(j.area_ids)?j.area_ids.join(','):String(j.area_ids));}catch(e){}
-        try{localStorage.removeItem('STT_ACTIVE_AREA_V1')}catch(e){}
-        if(j.area_id)try{localStorage.setItem('STT_USER_AREA_V1',String(j.area_id))}catch(e){}
+      if(j&&j.ok!==false&&j.validated){
+        if(j.user_token)try{localStorage.setItem('STT_USER_TOKEN_V1',String(j.user_token))}catch(e){}
+        try{localStorage.setItem('STT_ALLOWED_AREAS_V1',Array.isArray(j.area_ids)?j.area_ids.join(','):String(j.area_ids||j.area_id||''));}catch(e){}
+        if(j.is_admin){setAdminBypass(true);try{localStorage.setItem('STT_ADMIN_SESSION_V1',token)}catch(e){}}
+        else setAdminBypass(false);
+        const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+        const allowed=Array.isArray(j.area_ids)?j.area_ids.map(String):[];
+        if(active && active!=='ALL' && !allowed.includes(active)){try{localStorage.removeItem('STT_ACTIVE_AREA_V1')}catch(e){}}
         apply('allowed');
-      }else if(j&&String(j.message||j.error||'')==='USER_BLOCKED'){apply('blocked');}
-      else{clearCreds();apply('guest');}
-    }catch(e){if(status!=='allowed')apply(status);const m=document.getElementById('ugMsg');if(m)m.textContent='CENTRAL belum dapat dihubungi. Coba lagi.';}
-    finally{checking=false;}
+        if(!String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'') && typeof window.STT_OPEN_AREA_SELECTOR==='function'){
+          setTimeout(()=>{try{window.STT_OPEN_AREA_SELECTOR({is_admin:!!j.is_admin,area_id:j.area_id,area_ids:j.area_ids,user_token:token});}catch(e){}},60);
+        }
+      }else if(j&&String(j.message||j.error||'')==='USER_BLOCKED'){
+        clearCreds();try{localStorage.removeItem('STT_USER_TOKEN_V1');localStorage.removeItem('STT_ADMIN_SESSION_V1')}catch(e){};setAdminBypass(false);apply('blocked');
+      }else{
+        clearCreds();try{localStorage.removeItem('STT_USER_TOKEN_V1');localStorage.removeItem('STT_ADMIN_SESSION_V1');localStorage.removeItem('STT_ACTIVE_AREA_V1')}catch(e){};setAdminBypass(false);apply('guest');
+      }
+    }catch(e){
+      if(showMsg){const m=document.getElementById('ugMsg');if(m)m.textContent='❌ CENTRAL belum dapat dihubungi. Coba lagi.';}
+      // Do not destroy a still-valid local session on a transient network failure.
+      if(status!=='allowed')apply('guest');
+    }finally{checking=false;}
   }
 
   let _adminPanelWasVisible=false;
@@ -5465,10 +5458,9 @@ renderAreas();
 
   document.addEventListener('DOMContentLoaded',()=>{
     css();
-    const creds=loadCreds();
-    apply(creds&&creds.u?'allowed':'guest'); // optimis: tampilkan app dulu, verifikasi background
+    apply('guest');
     setTimeout(()=>checkCentral(false),400);
-    timer=setInterval(()=>checkCentral(false),30000);
+    timer=setInterval(()=>checkCentral(false),60000);
     setTimeout(installAdminControls,900);
     setInterval(installAdminControls,2000);
   });
@@ -5478,7 +5470,7 @@ renderAreas();
     setStatus:setUserStatus,
     editUser:editUser,
     deleteUser:deleteUser,
-    logout:()=>{clearCreds();setAdminBypass(false);apply('guest')},
+    logout:()=>{clearCreds();clearAdminSession();try{localStorage.removeItem('STT_USER_TOKEN_V1');localStorage.removeItem('STT_ACTIVE_AREA_V1');localStorage.removeItem('STT_ALLOWED_AREAS_V1')}catch(e){}setAdminBypass(false);apply('guest')},
     check:()=>checkCentral(true)
   };
 })();
@@ -5735,7 +5727,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V27 FINAL PATROL FLOW FIX ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V28 FINAL SESSION/TEMPLATE FIX ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5778,14 +5770,14 @@ function openSelector(info){
 }
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const a=allowed();const isAdmin=ua()==='ALL';if(!isAdmin&&!a.length)return;openSelector({is_admin:isAdmin,area_id:a[0]||'ALL',area_ids:isAdmin?AREAS:a,user_token:get(K.T)})}
 function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!aa())return;let b=document.getElementById('sttAreaBadgeV15');if(!b){b=document.createElement('span');b.id='sttAreaBadgeV15';t.appendChild(b)}b.textContent=aa()==='ALL'?'ALL AREA':aa().replace('_',' ')}catch(e){}}
-const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V27){window.__STT_MULTI_AREA_FETCH_V27=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
-function clear(){del(K.T);del(K.U);del(K.A);del(K.P);del('STT_ADMIN_BYPASS_V1')}
+const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V28){window.__STT_MULTI_AREA_FETCH_V28=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
+function clear(){del(K.T);del(K.U);del(K.A);del(K.P);del('STT_ADMIN_BYPASS_V1');del('STT_ADMIN_SESSION_V1');del('STT_USER_CREDS_V1')}
 function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){const old=window.STT_USER_ACCESS.logout;window.STT_USER_ACCESS.logout=function(){clear();if(typeof old==='function')old()};window.STT_USER_ACCESS.__MA=1}}catch(e){}}
 function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
 function adminCrud(){const box=document.getElementById('sttUserAccessManager');if(!box||box.dataset.ma==='1')return;box.dataset.ma='1';const d=document.createElement('div');d.style.cssText='margin-top:14px;padding:14px;border:2px solid #dbe5f0;border-radius:14px;background:#fbfdff';d.innerHTML='<div style="font-weight:900;color:#0b3d91;margin-bottom:10px">USER MANAGEMENT • MULTI AREA</div><div class="small">User yang sama dapat diberi akses Area A, Area B, atau keduanya.</div>';box.appendChild(d)}
 document.addEventListener('DOMContentLoaded',()=>setTimeout(install,500));setInterval(install,2000);
 window.STT_OPEN_AREA_SELECTOR=openSelector;
-window.STT_AREA_ACCESS_V26={getAllowedAreas:()=>allowed(),openSelector,saveAllowed,clear};
+window.STT_AREA_ACCESS_V28={getAllowedAreas:()=>allowed(),openSelector,saveAllowed,clear};
 })();
 </script>
 
