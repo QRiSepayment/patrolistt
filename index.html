@@ -1272,6 +1272,17 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 .stt23-authority{background:#eff6ff!important;color:#1e3a8a!important;border-left:5px solid #2563eb}.stt23-auto-caption{background:#f8fafc!important;color:#0f172a!important;border:1px solid #dbeafe}.stt-photo-desc.is-finding{border:3px solid #dc2626!important;background:#fee2e2!important;color:#991b1b!important;font-weight:900!important;font-size:20px!important}.stt23-picker-item{position:relative}.stt23-picker-check{width:34px;height:34px;border-radius:10px;border:2px solid #94a3b8;display:inline-flex;align-items:center;justify-content:center;background:#fff;font-size:21px;font-weight:950;flex:0 0 34px}.stt23-picker-item[data-used="true"] .stt23-picker-check{border-color:#16a34a;background:#dcfce7;color:#166534}.stt23-picker-item[data-used="false"] .stt23-picker-check{color:#64748b}.stt23-picker-badge{white-space:nowrap}.stt23-picker-item:disabled{opacity:.9;cursor:default}.stt23-picker-summary{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.stt23-picker-summary span{padding:7px 10px;border-radius:999px;font-size:12px;font-weight:900;background:#f1f5f9;color:#334155}.stt23-picker-summary .done{background:#dcfce7;color:#166534}@media(max-width:680px){.stt23-add-btn{font-size:16px!important}.stt23-template{padding:13px}.stt23-checks{font-size:13px}}
 </style>
 <meta name="stt-build" content="V31-FINAL-2026-10-02-NATIVE-POINT-DROPDOWN-DURABLE-PATROL-DATA">
+
+<style id="STT_NATIVE_POINT_SELECT_V32">
+#addAreaCameraBtn.stt-native-point-select{
+  display:block;width:100%;min-height:58px;padding:15px 48px 15px 20px;box-sizing:border-box;
+  border:2px solid #1f568c;border-radius:18px;background:#fff;color:#164e8a;
+  font-weight:900;font-size:17px;text-align:center;cursor:pointer;
+  appearance:auto;-webkit-appearance:auto;
+}
+#addAreaCameraBtn.stt-native-point-select option{font-size:17px;padding:10px;}
+#stt23AreaPicker{display:none!important;}
+</style>
 </head>
 <body>
 
@@ -1665,11 +1676,10 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 
         <!-- SMART 23 AREA PATROL TEMPLATE -->
         <div id="stt23AreaLauncher" class="stt23-launcher" style="margin-top:28px;text-align:center">
-          <select id="addAreaCameraBtn" class="btn btn-ghost stt23-add-btn" aria-label="Pilih titik patroli">
+          <select id="addAreaCameraBtn" class="btn btn-ghost stt23-add-btn stt-native-point-select" aria-label="Pilih titik patroli">
             <option value="">📍 PILIH AREA PATROLI</option>
           </select>
           <div id="stt23AreaCounter" class="stt23-counter" style="margin-top:8px">0 TITIK DIPILIH</div>
-          <button id="stt23CustomOpenBtn" type="button" class="btn btn-ghost" style="margin-top:8px;width:100%">➕ CUSTOM AREA</button>
         </div>
 
         <!-- PICKER 23 AREA: petugas memilih area secara manual, tidak otomatis berurutan -->
@@ -3442,26 +3452,10 @@ function setupSuperCleanup() {
     const pointSelect=document.getElementById('addAreaCameraBtn');
     pointSelect?.addEventListener('change', async e=>{
       const value=String(e.target.value||'');
-      if(!value){
-        const actNow=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
-        if(!actNow||actNow==='ALL'){
-          const token=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
-          const allowedRaw=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
-          const assigned=allowedRaw.split(',').map(x=>String(x).trim().toUpperCase()).filter(Boolean);
-          const isAdmin=String(localStorage.getItem('STT_USER_AREA_V1')||'').toUpperCase()==='ALL' || !!window.adminUnlocked || !!window.adminBypass;
-          if(typeof window.STT_OPEN_AREA_SELECTOR==='function') window.STT_OPEN_AREA_SELECTOR({is_admin:isAdmin,area_ids:isAdmin?AREAS:assigned,user_token:token,openPointPicker:false});
-        }
-        return;
-      }
+      if(!value){ return; }
       try{ await addNewArea(value); }catch(err){ console.warn('[POINT SELECT]',err); }
       e.target.value='';
       if(typeof window.STT_REFRESH_POINT_SELECT==='function') window.STT_REFRESH_POINT_SELECT();
-    });
-    document.getElementById('stt23CustomOpenBtn')?.addEventListener('click',()=>{
-      const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
-      if(!active||active==='ALL'){ alert('⚠️ Pilih Area kerja terlebih dahulu.'); return; }
-      open23AreaPicker();
-      setTimeout(()=>document.getElementById('sttCustomAreaName')?.focus(),120);
     });
 
     const pickerClose=document.getElementById('stt23PickerClose');
@@ -3537,7 +3531,7 @@ function setupSuperCleanup() {
       galleryInput.value='';
     });
 
-    // V31 GLOBAL AREA LABEL — visible across all script scopes.
+    // V32 GLOBAL AREA LABEL — visible across all script scopes.
     window.STT_AREA_LABEL = window.STT_AREA_LABEL || function(id){
       const a=String(id||'').toUpperCase();
       if(a==='ALL') return 'ALL AREA';
@@ -4062,21 +4056,43 @@ function setupSuperCleanup() {
     async function refreshNativePointSelect_(){
       const sel=document.getElementById('addAreaCameraBtn'); if(!sel)return;
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
-      if(!active||active==='ALL'){sel.innerHTML='<option value="">📍 PILIH AREA PATROLI</option>';return;}
+      if(!active||active==='ALL'){
+        sel.innerHTML='<option value="">📍 PILIH AREA PATROLI</option>';
+        return;
+      }
+      // IMPORTANT: populate built-in points synchronously. Android must have
+      // real <option> entries BEFORE the user taps the native dropdown.
+      // Do not wait for GAS/backend here.
+      try{
+        const fixed=(active==='AREA_B'&&window.STT_AREA_B_MASTER?window.STT_AREA_B_MASTER.templates:(active==='AREA_A'?(window.STT_FIXED_23_AREA_TEMPLATES||[]):[]))||[];
+        const used=getUsedTemplateIdsForActiveArea_();
+        const label='PILIH AREA PATROLI';
+        const options=['<option value="">📍 '+label+'</option>'];
+        fixed.forEach((t,i)=>{
+          const id=String(t.id),done=used.has(id);
+          const num=t.order!=null?t.order:i+1;
+          const nm=String(t.name||'').toUpperCase().replace(/</g,'&lt;');
+          options.push('<option value="'+id.replace(/"/g,'&quot;')+'" '+(done?'disabled':'')+'>Area '+num+' — '+nm+(done?' ✓ SUDAH DIPILIH':'')+'</option>');
+        });
+        sel.innerHTML=options.join('');
+        sel.value='';
+      }catch(e){
+        console.warn('[POINT SELECT FIXED LOAD]',e);
+        sel.innerHTML='<option value="">📍 PILIH AREA PATROLI</option>';
+      }
+      // Custom points are optional. Append them after the built-ins arrive.
       try{
         const custom=await loadBackendCustomTemplates_(active);
-        const templates=getAreaPickerTemplates_(active,custom);
         const used=getUsedTemplateIdsForActiveArea_();
-        const label=typeof window.STT_AREA_LABEL==='function'?window.STT_AREA_LABEL(active):active.replace(/_/g,' ');
-        const options=['<option value="">📍 '+String(label).replace(/</g,'&lt;')+' • PILIH TITIK</option>'];
-        templates.forEach(t=>{
-          const id=String(t.id),done=used.has(id);
-          const n=t.order!=null?String(t.order)+'. ':'• ';
-          const prefix=done?'✓ ':'□ ';
-          options.push('<option value="'+id.replace(/"/g,'&quot;')+'" '+(done?'disabled':'')+'>'+prefix+n+String(t.name||'').toUpperCase().replace(/</g,'&lt;')+(done?' — SUDAH DIPILIH':'')+'</option>');
-        });
-        sel.innerHTML=options.join(''); sel.value='';
-      }catch(e){console.warn('[POINT SELECT LOAD]',e);sel.innerHTML='<option value="">📍 PILIH TITIK PATROLI</option>';}
+        if(Array.isArray(custom)&&custom.length){
+          custom.forEach((t,i)=>{
+            const id=String(t.id); if(used.has(id))return;
+            const opt=document.createElement('option');
+            opt.value=id; opt.textContent='Custom '+(i+1)+' — '+String(t.name||'').toUpperCase();
+            sel.appendChild(opt);
+          });
+        }
+      }catch(e){ console.warn('[POINT SELECT CUSTOM LOAD]',e); }
     }
     window.STT_REFRESH_POINT_SELECT=refreshNativePointSelect_;
 
@@ -5890,7 +5906,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V31 FINAL MANUAL POINT SELECTION ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V32 NATIVE DROPDOWN OFFLINE SAFE ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5917,7 +5933,14 @@ async function validateArea(a){
   try{const central=(typeof STT_FINDING_CENTRAL_URL==='string'&&STT_FINDING_CENTRAL_URL.trim())?STT_FINDING_CENTRAL_URL.trim():'';if(!central)return {ok:true};
     const r=await fetch(central,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'VALIDATE_AREA',user_token:token,area_id:a}).toString()});const j=await sttReadJson(r);
     if(j&&j.ok!==false)return {ok:true};return {ok:false,message:String(j?.message||j?.error||'Akses area ditolak.')};
-  }catch(e){return {ok:false,message:'Tidak dapat memverifikasi area ke CENTRAL. Coba lagi.'}}
+  }catch(e){
+    // Offline-first patrol: a logged-in user may select an already-assigned area
+    // even when CENTRAL is temporarily unreachable. Backend actions remain
+    // server-enforced; local patrol capture must not be lost because of network.
+    const assigned=areas(localStorage.getItem(K.P));
+    if(assigned.includes(String(a||'').toUpperCase()) || ua()==='ALL') return {ok:true,offline:true};
+    return {ok:false,message:'Tidak dapat memverifikasi area ke CENTRAL dan area ini belum pernah tersimpan sebagai akses. Coba lagi saat koneksi tersedia.'}
+  }
 }
 async function refreshDynamicAreas_(token, force=false){
   try{
@@ -5935,9 +5958,8 @@ async function refreshDynamicAreas_(token, force=false){
   }catch(e){console.warn('[AREA REGISTRY]',e);}
   return AREAS.slice();
 }
-function areaLabel_(id){
-  return typeof window.STT_AREA_LABEL==='function'?window.STT_AREA_LABEL(id):String(id||'').toUpperCase().replace(/_/g,' ');
-}
+window.areaLabel_=window.areaLabel_||function(id){return typeof window.STT_AREA_LABEL==='function'?window.STT_AREA_LABEL(id):String(id||'').toUpperCase().replace(/_/g,' ');};
+function areaLabel_(id){return window.areaLabel_(id)}
 async function openSelector(info){
   const admin=bool(info?.is_admin);
   let assigned=areas(info?.area_ids);
@@ -5957,10 +5979,10 @@ async function openSelector(info){
     d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';
     const vr=await validateArea(a);
     if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+areaLabel_(a);showAreaError(d,'❌ '+vr.message);return;}
-    set(K.A,a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){}
+    set(K.A,a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){} try{if(typeof window.STT_REFRESH_POINT_SELECT==='function')window.STT_REFRESH_POINT_SELECT();}catch(e){}
     d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}
     badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)}
-    if(a!=='ALL'&&info?.openPointPicker!==false){setTimeout(()=>{try{if(typeof window.open23AreaPicker==='function')window.open23AreaPicker()}catch(e){console.warn('[POINT PICKER]',e)}},120)}
+    if(a!=='ALL'){setTimeout(()=>{try{if(typeof window.STT_REFRESH_POINT_SELECT==='function')window.STT_REFRESH_POINT_SELECT();}catch(e){console.warn('[POINT SELECT]',e)}},120)}
   });
 }
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const a=allowed();const isAdmin=ua()==='ALL';if(!isAdmin&&!a.length)return;openSelector({is_admin:isAdmin,area_id:a[0]||'ALL',area_ids:isAdmin?AREAS:a,user_token:get(K.T)})}
