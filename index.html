@@ -1649,14 +1649,9 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
           <i class="fas fa-mobile-alt"></i> Ambil foto langsung menggunakan <strong style="color:var(--primary)">kamera asli HP Anda</strong>
         </div>
         
-        <!-- Area Selector -->
-        <div class="area-selector" id="areaSelector" style="display:none">
-          <label class="small" style="font-weight:700;color:var(--primary)"><i class="fas fa-map-marker-alt"></i> PILIH AREA UNTUK FOTO:</label>
-          <select id="targetAreaSelect" style="width:100%;padding:14px;border-radius:12px;border:2px solid #e2e8f0;margin-top:8px;font-size:15px">
-            <option value="">-- Pilih Area --</option>
-          </select>
-          <div class="small" style="margin-top:8px;color:var(--muted)">Pilih area mana yang akan menerima foto dari kamera</div>
-        </div>
+        <!-- Camera target follows the currently selected patrol point.
+             The old duplicate "PILIH AREA UNTUK FOTO" selector is intentionally removed. -->
+        <div class="area-selector" id="areaSelector" style="display:none!important" aria-hidden="true"></div>
 
         <!-- SATU FITUR KAMERA: kamera HP + galeri terkunci ADMIN -->
         <div style="text-align:center; margin:28px 0">
@@ -3448,7 +3443,7 @@ function setupSuperCleanup() {
 
     targetAreaSelect?.addEventListener('change', e => { currentTargetArea = e.target.value; });
 
-    // V31: native Android dropdown. User memilih titik bebas, tidak berurutan.
+    // V33: native Android dropdown. ALL points remain visible; selected points are not disabled.
     const pointSelect=document.getElementById('addAreaCameraBtn');
     pointSelect?.addEventListener('change', async e=>{
       const value=String(e.target.value||'');
@@ -4049,8 +4044,9 @@ function setupSuperCleanup() {
       if(/^STT-[AB]\d+$/i.test(String(template.id))&&String(template.id).toUpperCase().charAt(4)!==(active==='AREA_B'?'B':'A'))return false;
       const used=getUsedTemplateIdsForActiveArea_(); if(used.has(String(template.id))){return false;}
       const id=nextAreaId(),displayName=String(template.name||'').toUpperCase();
+      currentTargetArea=String(id);
       patrolData[id]={name:displayName,templateId:template.id,templateOrder:template.order??null,notes:'',globalDescription:'',patrolStatus:'AMAN TERKENDALI',photos:[],descriptions:[],descriptionFlags:[],timestamp:Date.now(),customArea:!!template.customArea,customChecks:Array.isArray(template.checks)?template.checks.slice():[]};
-      persistMeta();renderAreas();try{window.dispatchEvent(new Event('stt-patrol-data-changed'))}catch(_){} currentTargetArea=String(id);updateAreaSelector();const selector=document.getElementById('targetAreaSelect');if(selector)selector.value=currentTargetArea;update23AreaCounter();close23AreaPicker();
+      persistMeta();renderAreas();try{window.dispatchEvent(new Event('stt-patrol-data-changed'))}catch(_){} updateAreaSelector();update23AreaCounter();close23AreaPicker();
       return true;
     }
     async function refreshNativePointSelect_(){
@@ -4072,7 +4068,7 @@ function setupSuperCleanup() {
           const id=String(t.id),done=used.has(id);
           const num=t.order!=null?t.order:i+1;
           const nm=String(t.name||'').toUpperCase().replace(/</g,'&lt;');
-          options.push('<option value="'+id.replace(/"/g,'&quot;')+'" '+(done?'disabled':'')+'>Area '+num+' — '+nm+(done?' ✓ SUDAH DIPILIH':'')+'</option>');
+          options.push('<option value="'+id.replace(/"/g,'&quot;')+'">Area '+num+' — '+nm+(done?' ✓ SUDAH DIPILIH':'')+'</option>');
         });
         sel.innerHTML=options.join('');
         sel.value='';
@@ -4086,9 +4082,9 @@ function setupSuperCleanup() {
         const used=getUsedTemplateIdsForActiveArea_();
         if(Array.isArray(custom)&&custom.length){
           custom.forEach((t,i)=>{
-            const id=String(t.id); if(used.has(id))return;
+            const id=String(t.id);
             const opt=document.createElement('option');
-            opt.value=id; opt.textContent='Custom '+(i+1)+' — '+String(t.name||'').toUpperCase();
+            opt.value=id; opt.textContent='Custom '+(i+1)+' — '+String(t.name||'').toUpperCase()+(used.has(id)?' ✓ SUDAH DIPILIH':'');
             sel.appendChild(opt);
           });
         }
@@ -5906,7 +5902,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V32 NATIVE DROPDOWN OFFLINE SAFE ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V33 NATIVE DROPDOWN ALL-POINTS ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5987,7 +5983,7 @@ async function openSelector(info){
 }
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const a=allowed();const isAdmin=ua()==='ALL';if(!isAdmin&&!a.length)return;openSelector({is_admin:isAdmin,area_id:a[0]||'ALL',area_ids:isAdmin?AREAS:a,user_token:get(K.T)})}
 function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!aa())return;let b=document.getElementById('sttAreaBadgeV15');if(!b){b=document.createElement('span');b.id='sttAreaBadgeV15';t.appendChild(b)}b.textContent=aa()==='ALL'?'ALL AREA':aa().replace('_',' ')}catch(e){}}
-const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V30){window.__STT_MULTI_AREA_FETCH_V30=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
+const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V33){window.__STT_MULTI_AREA_FETCH_V33=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
 function clear(){del(K.T);del(K.U);del(K.A);del(K.P);del('STT_ADMIN_BYPASS_V1');del('STT_ADMIN_SESSION_V1');del('STT_USER_CREDS_V1')}
 function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){const old=window.STT_USER_ACCESS.logout;window.STT_USER_ACCESS.logout=function(){clear();if(typeof old==='function')old()};window.STT_USER_ACCESS.__MA=1}}catch(e){}}
 function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
