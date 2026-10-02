@@ -1671,8 +1671,11 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
 
         <!-- SMART 23 AREA PATROL TEMPLATE -->
         <div id="stt23AreaLauncher" class="stt23-launcher" style="margin-top:28px;text-align:center">
+          <select id="sttWorkAreaSelect" class="btn btn-ghost stt-native-point-select" aria-label="Pilih area kerja" style="margin-bottom:10px">
+            <option value="">📍 PILIH AREA KERJA</option>
+          </select>
           <select id="addAreaCameraBtn" class="btn btn-ghost stt23-add-btn stt-native-point-select" aria-label="Pilih titik patroli">
-            <option value="">📍 PILIH AREA PATROLI</option>
+            <option value="">📍 PILIH TITIK PATROLI</option>
           </select>
           <div id="stt23AreaCounter" class="stt23-counter" style="margin-top:8px">0 TITIK DIPILIH</div>
         </div>
@@ -3446,6 +3449,14 @@ function setupSuperCleanup() {
     targetAreaSelect?.addEventListener('change', e => { currentTargetArea = e.target.value; });
 
     // V35: native Android dropdown. ALL points remain visible; selected points are not disabled.
+    const workAreaSelect=document.getElementById('sttWorkAreaSelect');
+    workAreaSelect?.addEventListener('change', async e=>{
+      const value=String(e.target.value||'').toUpperCase();
+      if(!value)return;
+      const ok=await setActiveWorkArea_(value);
+      if(!ok) await refreshWorkAreaSelect_();
+    });
+
     const pointSelect=document.getElementById('addAreaCameraBtn');
     pointSelect?.addEventListener('change', async e=>{
       const value=String(e.target.value||'');
@@ -4003,11 +4014,26 @@ function setupSuperCleanup() {
       modal.classList.add('open');modal.setAttribute('aria-hidden','false');
       const sw=document.getElementById('stt23PickerSwitchArea');
       if(sw){
-        const rawAl=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
-        const al=rawAl.split(',').map(x=>x.trim().toUpperCase()).filter(x=>AREAS.includes(x));
+        const token=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
+        let al=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'').split(',').map(x=>x.trim().toUpperCase()).filter(x=>AREAS.includes(x));
         const adm=String(localStorage.getItem('STT_USER_AREA_V1')||'').toUpperCase()==='ALL'||!!window.adminUnlocked||!!window.adminBypass;
-        sw.style.display=(adm||al.length>1)?'':'none';
-        sw.onclick=()=>{close23AreaPicker();if(typeof window.STT_OPEN_AREA_SELECTOR==='function')window.STT_OPEN_AREA_SELECTOR({is_admin:adm,area_ids:adm?AREAS.slice():al,user_token:String(localStorage.getItem('STT_USER_TOKEN_V1')||''),openPointPicker:false});};
+        // Jangan bergantung pada cache allowed-area lama. Jika user memang
+        // punya akses A+B, validasi B dari backend dan pulihkan daftar akses.
+        // Ini mencegah picker terkunci hanya di AREA A setelah refresh/close.
+        if(token && !adm){
+          try{
+            const checks=await Promise.all(AREAS.map(async a=>{try{const r=await validateArea(a);return r&&r.ok?a:'';}catch(_){return ''}}));
+            const verified=[...new Set(checks.filter(Boolean))];
+            if(verified.length){al=verified;saveAllowed(verified);}
+          }catch(_){}
+        }
+        const canSwitch=adm||al.length>1;
+        sw.style.display=canSwitch?'':'none';
+        sw.textContent='🔄 GANTI AREA KERJA';
+        sw.onclick=()=>{
+          close23AreaPicker();
+          if(typeof window.STT_OPEN_AREA_SELECTOR==='function')window.STT_OPEN_AREA_SELECTOR({is_admin:adm,area_ids:adm?AREAS.slice():al,user_token:token,openPointPicker:false});
+        };
       }
       const list=document.getElementById('stt23PickerList'); if(list)list.innerHTML='<div class="stt23-picker-empty">⏳ MEMUAT TITIK AREA...</div>';
       await render23AreaPicker('');
@@ -4056,6 +4082,65 @@ function setupSuperCleanup() {
       persistMeta();renderAreas();try{window.dispatchEvent(new Event('stt-patrol-data-changed'))}catch(_){} updateAreaSelector();update23AreaCounter();close23AreaPicker();
       return true;
     }
+    // V38: WORK AREA IS A FIRST-CLASS SELECTOR.
+    // The user explicitly chooses AREA A or AREA B first; the point dropdown is
+    // then rebuilt from that active area only. Never mix A/B points.
+    async function refreshWorkAreaSelect_(){
+      const sel=document.getElementById('sttWorkAreaSelect');
+      if(!sel)return;
+      const token=String(localStorage.getItem('STT_USER_TOKEN_V1')||'');
+      const isAdmin=String(localStorage.getItem('STT_USER_AREA_V1')||'').toUpperCase()==='ALL'||!!window.adminUnlocked||!!window.adminBypass;
+      let ids=[];
+      try{
+        const raw=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
+        ids=raw.split(',').map(x=>x.trim().toUpperCase()).filter(Boolean);
+      }catch(_){ }
+      if(isAdmin) ids=Array.from(AREAS||[]);
+      // If the saved list is incomplete, verify the canonical A/B assignments.
+      // This specifically repairs old sessions that retained only AREA_A.
+      if(token && !isAdmin){
+        try{
+          const candidates=Array.from(new Set([...(AREAS||[]),'AREA_A','AREA_B']));
+          const verified=await Promise.all(candidates.map(async a=>{
+            try{const r=await validateArea(a);return r&&r.ok?a:'';}catch(_){return ''}
+          }));
+          const good=verified.filter(Boolean);
+          if(good.length){ids=Array.from(new Set(good));saveAllowed(ids);}
+        }catch(_){ }
+      }
+      ids=Array.from(new Set(ids.filter(x=>/^AREA_[A-Z0-9]+$/.test(x))));
+      // Fallback to the currently known areas only when access is already known.
+      if(!ids.length){
+        sel.innerHTML='<option value="">📍 PILIH AREA KERJA</option>';
+        return;
+      }
+      const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+      const labelFn=(id)=>{
+        try{return typeof window.areaLabel_==='function'?window.areaLabel_(id):String(id).replace(/_/g,' ')}catch(_){return String(id).replace(/_/g,' ')}
+      };
+      sel.innerHTML='<option value="">📍 PILIH AREA KERJA</option>'+ids.map((id,i)=>
+        '<option value="'+id+'">'+labelFn(id)+'</option>'
+      ).join('');
+      if(ids.includes(active)) sel.value=active;
+      else if(ids.length===1 && active) sel.value=ids[0];
+      else sel.value='';
+    }
+
+    async function setActiveWorkArea_(area){
+      area=String(area||'').trim().toUpperCase();
+      if(!/^AREA_[A-Z0-9]+$/.test(area))return false;
+      const vr=await validateArea(area);
+      if(!vr.ok){alert('❌ '+String(vr.message||'Akses area ditolak.'));return false;}
+      try{
+        localStorage.setItem('STT_ACTIVE_AREA_V1',area);
+        localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',area);
+      }catch(_){ }
+      try{window.dispatchEvent(new Event('stt-area-changed'));}catch(_){ }
+      await refreshNativePointSelect_();
+      try{update23AreaCounter();}catch(_){ }
+      return true;
+    }
+
     async function refreshNativePointSelect_(){
       const sel=document.getElementById('addAreaCameraBtn'); if(!sel)return;
       // V35: NEVER leave the native point dropdown empty after refresh/reopen.
@@ -4123,12 +4208,18 @@ function setupSuperCleanup() {
       }catch(e){ console.warn('[POINT SELECT CUSTOM LOAD]',e); }
     }
     window.STT_REFRESH_POINT_SELECT=refreshNativePointSelect_;
-    // V36: populate immediately only when an active work area already exists.
-    // If there is no active area, leave the select at its placeholder and let
-    // the Area A/B gate ask the user to choose the work area.
+    // V38: always rebuild the FIRST dropdown (AREA A/B) and then the POINT dropdown.
+    // A refresh/force-close must never make the area selector disappear.
     try{
-      const bootArea=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
-      if(/^AREA_[A-Z0-9]+$/.test(bootArea)) setTimeout(()=>refreshNativePointSelect_(),0);
+      setTimeout(async()=>{
+        await refreshWorkAreaSelect_();
+        const bootArea=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+        if(/^AREA_[A-Z0-9]+$/.test(bootArea)) await refreshNativePointSelect_();
+        else {
+          const ps=document.getElementById('addAreaCameraBtn');
+          if(ps)ps.innerHTML='<option value="">📍 PILIH TITIK PATROLI</option>';
+        }
+      },0);
     }catch(_){}
 
     function update23AreaCounter(){
@@ -4233,7 +4324,7 @@ function setupSuperCleanup() {
         if(typeof window.STT_REFRESH_POINT_SELECT==='function') window.STT_REFRESH_POINT_SELECT();
       }catch(e){console.warn('[AREA DATA RELOAD]',e);renderAreas();}
     }
-    // V36 final durability guard: preserve active area before refresh/close.
+    // V37 final durability guard: preserve active area before refresh/close.
   function sttPersistActiveAreaBeforeExit_(){
     try{
       let a=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||localStorage.getItem('STT_LAST_ACTIVE_AREA_V1')||'').toUpperCase();
@@ -5984,7 +6075,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V36 AREA GATE + PERSISTENT DROPDOWN ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V37 AREA GATE + PERSISTENT DROPDOWN ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5996,7 +6087,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #sttAreaBadgeV15{display:inline-flex;align-items:center;gap:7px;margin-left:10px;padding:5px 10px;border-radius:999px;background:#eaf2ff;color:#164e8a;font-size:11px;font-weight:900}
 @media(max-width:560px){#sttAreaGateV15 .stt-area-grid{grid-template-columns:1fr}#sttAreaGateV15 .stt-area-btn.all{grid-column:auto}}
 </style>
-<script id="STT_MULTI_AREA_ACCESS_V30_DYNAMIC">
+<script id="STT_MULTI_AREA_ACCESS_V38_AREA_POINT">
 (function(){'use strict';
 const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',P:'STT_ALLOWED_AREAS_V1',N:'STT_AREA_NAMES_V1'}, AREAS=['AREA_A','AREA_B'];
 const n=v=>{const s=String(v??'').trim().toUpperCase().replace(/[\s-]+/g,'_');return s==='ALL'?'ALL':(AREAS.includes(s)?s:'')};
