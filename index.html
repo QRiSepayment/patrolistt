@@ -4071,11 +4071,18 @@ function setupSuperCleanup() {
           const raw=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
           raw.split(',').forEach(x=>candidates.push(x));
         }catch(_){}
-        active=(candidates.map(x=>String(x||'').trim().toUpperCase()).find(validArea)||'AREA_A');
-        try{
-          localStorage.setItem('STT_ACTIVE_AREA_V1',active);
-          localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',active);
-        }catch(_){}
+        const recovered=candidates.map(x=>String(x||'').trim().toUpperCase()).find(validArea)||'';
+        // Do NOT silently choose AREA_A when the user has multiple areas.
+        // The Area A/B gate must remain available so the user explicitly
+        // chooses the work area. Only auto-restore when a real previous
+        // active area exists.
+        active=recovered;
+        if(active){
+          try{
+            localStorage.setItem('STT_ACTIVE_AREA_V1',active);
+            localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',active);
+          }catch(_){}
+        }
       }
       if(!validArea(active)){
         sel.innerHTML='<option value="">📍 PILIH AREA PATROLI</option>';
@@ -4116,6 +4123,13 @@ function setupSuperCleanup() {
       }catch(e){ console.warn('[POINT SELECT CUSTOM LOAD]',e); }
     }
     window.STT_REFRESH_POINT_SELECT=refreshNativePointSelect_;
+    // V36: populate immediately only when an active work area already exists.
+    // If there is no active area, leave the select at its placeholder and let
+    // the Area A/B gate ask the user to choose the work area.
+    try{
+      const bootArea=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+      if(/^AREA_[A-Z0-9]+$/.test(bootArea)) setTimeout(()=>refreshNativePointSelect_(),0);
+    }catch(_){}
 
     function update23AreaCounter(){
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
@@ -4219,7 +4233,7 @@ function setupSuperCleanup() {
         if(typeof window.STT_REFRESH_POINT_SELECT==='function') window.STT_REFRESH_POINT_SELECT();
       }catch(e){console.warn('[AREA DATA RELOAD]',e);renderAreas();}
     }
-    // V35 final durability guard: preserve active area before refresh/close.
+    // V36 final durability guard: preserve active area before refresh/close.
   function sttPersistActiveAreaBeforeExit_(){
     try{
       let a=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||localStorage.getItem('STT_LAST_ACTIVE_AREA_V1')||'').toUpperCase();
@@ -5970,7 +5984,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V34 NATIVE DROPDOWN ALL-POINTS ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V36 AREA GATE + PERSISTENT DROPDOWN ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
