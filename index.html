@@ -1889,7 +1889,7 @@ body:not(.admin-unlocked) #companySection{display:none !important;}
   <div class="modal-card" id="modalCard"></div>
 </div>
 
-<script>window.STT_BUILD_ID_V26='PATROLSTT-V26-FINAL-2026-10-01';</script><script>
+<script>window.STT_BUILD_ID_V26='PATROLSTT-V26-FINAL-2026-10-01';window.AREAS=window.AREAS||['AREA_A','AREA_B'];</script><script>
 // ==================== GLOBAL FETCH RETRY ====================
 // Shared by PDF Export, Word Export, and other runtime modules.
 window.fetchRetry = window.fetchRetry || (async function fetchRetry(url, opts = {}, timeout = 15000, retries = 2) {
@@ -3978,8 +3978,15 @@ function setupSuperCleanup() {
       }catch(e){console.warn('[AREA TEMPLATE LOAD]',e);}
       window.STT_BACKEND_CUSTOM_TEMPLATES[active]=[]; return [];
     }
+    function getFixedTemplates_(active){
+      active=String(active||'').toUpperCase();
+      if(active==='AREA_B') return (window.STT_AREA_B_MASTER&&window.STT_AREA_B_MASTER.templates)||[];
+      if(active==='AREA_A') return window.STT_FIXED_23_AREA_TEMPLATES||[];
+      const reg=window.STT_AREA_TEMPLATES&&window.STT_AREA_TEMPLATES[active];
+      return Array.isArray(reg)?reg:[];
+    }
     function getAreaPickerTemplates_(active, custom){
-      const fixed=active==='AREA_B'&&window.STT_AREA_B_MASTER?window.STT_AREA_B_MASTER.templates:(active==='AREA_A'?(window.STT_FIXED_23_AREA_TEMPLATES||[]):[]);
+      const fixed=getFixedTemplates_(active);
       const builtins=fixed.map(t=>Object.assign({},t,{customArea:false}));
       return builtins.concat(Array.isArray(custom)?custom.map((t,i)=>Object.assign({},t,{customArea:true,order:null,customOrder:i+1})):[]);
     }
@@ -4096,17 +4103,33 @@ function setupSuperCleanup() {
         ids=raw.split(',').map(x=>x.trim().toUpperCase()).filter(Boolean);
       }catch(_){ }
       if(isAdmin) ids=Array.from(AREAS||[]);
-      // If the saved list is incomplete, verify the canonical A/B assignments.
-      // This specifically repairs old sessions that retained only AREA_A.
+      const _normIds=a=>Array.from(new Set(a.filter(x=>/^AREA_[A-Z0-9]+$/.test(x))));
+      const _paint=(list)=>{
+        const act=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+        const lf=(id)=>{try{return typeof window.areaLabel_==='function'?window.areaLabel_(id):String(id).replace(/_/g,' ')}catch(_){return String(id).replace(/_/g,' ')}};
+        const cur=sel.value;
+        sel.innerHTML='<option value="">📍 PILIH AREA KERJA</option>'+list.map(id=>'<option value="'+id+'">'+lf(id)+'</option>').join('');
+        if(list.includes(act)) sel.value=act;
+        else if(list.length===1&&act) sel.value=list[0];
+        else sel.value=list.includes(cur)?cur:'';
+      };
+      // Paint immediately from stored list (no network wait), then verify once per 5 min.
+      ids=_normIds(ids);
+      if(ids.length) _paint(ids);
       if(token && !isAdmin){
-        try{
-          const candidates=Array.from(new Set([...(AREAS||[]),'AREA_A','AREA_B']));
-          const verified=await Promise.all(candidates.map(async a=>{
-            try{const r=await validateArea(a);return r&&r.ok?a:'';}catch(_){return ''}
-          }));
-          const good=verified.filter(Boolean);
-          if(good.length){ids=Array.from(new Set(good));saveAllowed(ids);}
-        }catch(_){ }
+        const ckKey='STT_AREA_VERIFY_V1:'+token.slice(-8);
+        let fresh=false;
+        try{const c=JSON.parse(sessionStorage.getItem(ckKey)||'null');fresh=!!(c&&Date.now()-c.t<300000&&ids.length);}catch(_){}
+        if(!fresh){
+          try{
+            const candidates=Array.from(new Set([...(AREAS||[]),'AREA_A','AREA_B']));
+            const verified=await Promise.all(candidates.map(async a=>{
+              try{const r=await validateArea(a);return r&&r.ok?a:'';}catch(_){return ''}
+            }));
+            const good=_normIds(verified.filter(Boolean));
+            if(good.length){ids=good;saveAllowed(ids);try{sessionStorage.setItem(ckKey,JSON.stringify({t:Date.now()}));}catch(_){}}
+          }catch(_){ }
+        }
       }
       ids=Array.from(new Set(ids.filter(x=>/^AREA_[A-Z0-9]+$/.test(x))));
       // Fallback to the currently known areas only when access is already known.
@@ -4141,7 +4164,14 @@ function setupSuperCleanup() {
       return true;
     }
 
+    let _ptSelBusy=false,_ptSelAgain=false;
     async function refreshNativePointSelect_(){
+      if(_ptSelBusy){_ptSelAgain=true;return;}
+      _ptSelBusy=true;
+      try{ do{ _ptSelAgain=false; await refreshNativePointSelectImpl_(); }while(_ptSelAgain); }
+      finally{ _ptSelBusy=false; }
+    }
+    async function refreshNativePointSelectImpl_(){
       const sel=document.getElementById('addAreaCameraBtn'); if(!sel)return;
       // V35: NEVER leave the native point dropdown empty after refresh/reopen.
       // Recover the last active area from durable local state; if it is missing,
@@ -4177,7 +4207,7 @@ function setupSuperCleanup() {
       // real <option> entries BEFORE the user taps the native dropdown.
       // Do not wait for GAS/backend here.
       try{
-        const fixed=(active==='AREA_B'&&window.STT_AREA_B_MASTER?window.STT_AREA_B_MASTER.templates:(active==='AREA_A'?(window.STT_FIXED_23_AREA_TEMPLATES||[]):[]))||[];
+        const fixed=getFixedTemplates_(active);
         const used=getUsedTemplateIdsForActiveArea_();
         const label='PILIH AREA PATROLI';
         const options=['<option value="">📍 '+label+'</option>'];
@@ -4208,6 +4238,7 @@ function setupSuperCleanup() {
       }catch(e){ console.warn('[POINT SELECT CUSTOM LOAD]',e); }
     }
     window.STT_REFRESH_POINT_SELECT=refreshNativePointSelect_;
+    window.STT_REFRESH_WORK_AREA_SELECT=refreshWorkAreaSelect_;
     // V38: always rebuild the FIRST dropdown (AREA A/B) and then the POINT dropdown.
     // A refresh/force-close must never make the area selector disappear.
     try{
@@ -4225,11 +4256,11 @@ function setupSuperCleanup() {
     function update23AreaCounter(){
       const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'AREA_A').toUpperCase();
       const n=active==='AREA_B'?getUsedAreaBTemplateIds().size:getUsedAreaATemplateIds().size;
-      const base=(active==='AREA_B'&&window.STT_AREA_B_MASTER)?window.STT_AREA_B_MASTER.templates.length:(active==='AREA_A'?(window.STT_FIXED_23_AREA_TEMPLATES||[]).length:0)+((Array.isArray(window.STT_BACKEND_CUSTOM_TEMPLATES?.[active])?window.STT_BACKEND_CUSTOM_TEMPLATES[active]:[]).length);
+      const base=getFixedTemplates_(active).length+(Array.isArray(window.STT_BACKEND_CUSTOM_TEMPLATES?.[active])?window.STT_BACKEND_CUSTOM_TEMPLATES[active].length:0);
       const el=document.getElementById('stt23AreaCounter');
       const btn=document.getElementById('addAreaCameraBtn');
-      if(el)el.textContent=`${n} / ${base} TITIK DIPILIH • ${areaLabelGlobal(active)}`;
-      if(btn){btn.disabled=false;refreshNativePointSelect_();}
+      if(el)el.textContent=`${n} / ${base} TITIK DIPILIH • ${(window.STT_AREA_LABEL?window.STT_AREA_LABEL(active):String(active).replace(/_/g,' '))}`;
+      if(btn){btn.disabled=false;}
     }
 
     document.getElementById('sttCustomAreaAddBtn')?.addEventListener('click',addCustomArea);
@@ -4328,7 +4359,7 @@ function setupSuperCleanup() {
   function sttPersistActiveAreaBeforeExit_(){
     try{
       let a=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||localStorage.getItem('STT_LAST_ACTIVE_AREA_V1')||'').toUpperCase();
-      if(!/^AREA_[A-Z0-9]+$/.test(a)) a='AREA_A';
+      if(!/^AREA_[A-Z0-9]+$/.test(a)) return; // no active area: never default to AREA_A
       localStorage.setItem('STT_ACTIVE_AREA_V1',a);
       localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',a);
       const raw=JSON.stringify(patrolData||{});
@@ -6089,7 +6120,8 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </style>
 <script id="STT_MULTI_AREA_ACCESS_V38_AREA_POINT">
 (function(){'use strict';
-const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',P:'STT_ALLOWED_AREAS_V1',N:'STT_AREA_NAMES_V1'}, AREAS=['AREA_A','AREA_B'];
+const K={A:'STT_ACTIVE_AREA_V1',U:'STT_USER_AREA_V1',T:'STT_USER_TOKEN_V1',P:'STT_ALLOWED_AREAS_V1',N:'STT_AREA_NAMES_V1'}, AREAS=(window.AREAS=window.AREAS||['AREA_A','AREA_B']);
+window.validateArea=validateArea;window.saveAllowed=saveAllowed;
 const n=v=>{const s=String(v??'').trim().toUpperCase().replace(/[\s-]+/g,'_');return s==='ALL'?'ALL':(AREAS.includes(s)?s:'')};
 const bool=v=>v===true||v===1||['true','1','yes'].includes(String(v??'').trim().toLowerCase());
 const get=k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set=(k,v)=>{try{localStorage.setItem(k,String(v))}catch(e){}},del=k=>{try{localStorage.removeItem(k)}catch(e){}};
@@ -6148,7 +6180,7 @@ async function openSelector(info){
     d.querySelectorAll('[data-a]').forEach(x=>x.disabled=true);b.textContent='⏳ MEMERIKSA AKSES...';
     const vr=await validateArea(a);
     if(!vr.ok){d.querySelectorAll('[data-a]').forEach(x=>x.disabled=false);b.textContent=a==='ALL'?'🌐 ALL AREA — ADMIN':'📍 '+areaLabel_(a);showAreaError(d,'❌ '+vr.message);return;}
-    set(K.A,a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){} try{if(typeof window.STT_REFRESH_POINT_SELECT==='function')window.STT_REFRESH_POINT_SELECT();}catch(e){}
+    set(K.A,a);try{window.dispatchEvent(new Event('stt-area-changed'))}catch(e){} try{if(typeof window.STT_REFRESH_WORK_AREA_SELECT==='function')Promise.resolve(window.STT_REFRESH_WORK_AREA_SELECT()).then(()=>{try{window.STT_REFRESH_POINT_SELECT&&window.STT_REFRESH_POINT_SELECT()}catch(e){}}).catch(()=>{})}catch(e){}
     d.remove();document.body.classList.remove('stt-user-locked');try{document.getElementById('sttUserGate')?.remove()}catch(e){}
     badge();try{if(typeof renderAreas==='function')renderAreas()}catch(e){console.warn('[AREA RENDER]',e)}
     if(a!=='ALL'){setTimeout(()=>{try{if(typeof window.STT_REFRESH_POINT_SELECT==='function')window.STT_REFRESH_POINT_SELECT();}catch(e){console.warn('[POINT SELECT]',e)}},120)}
@@ -6159,7 +6191,7 @@ function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!
 const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V34){window.__STT_MULTI_AREA_FETCH_V33=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
 function clear(){del(K.T);del(K.U);del(K.A);del(K.P);del('STT_ADMIN_BYPASS_V1');del('STT_ADMIN_SESSION_V1');del('STT_USER_CREDS_V1')}
 function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){const old=window.STT_USER_ACCESS.logout;window.STT_USER_ACCESS.logout=function(){clear();if(typeof old==='function')old()};window.STT_USER_ACCESS.__MA=1}}catch(e){}}
-function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
+function install(){wrap();try{if(typeof window.STT_REFRESH_WORK_AREA_SELECT==='function')Promise.resolve(window.STT_REFRESH_WORK_AREA_SELECT()).then(()=>{try{window.STT_REFRESH_POINT_SELECT&&window.STT_REFRESH_POINT_SELECT()}catch(e){}}).catch(()=>{})}catch(e){}const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
 function adminCrud(){const box=document.getElementById('sttUserAccessManager');if(!box||box.dataset.ma==='1')return;box.dataset.ma='1';const d=document.createElement('div');d.style.cssText='margin-top:14px;padding:14px;border:2px solid #dbe5f0;border-radius:14px;background:#fbfdff';d.innerHTML='<div style="font-weight:900;color:#0b3d91;margin-bottom:10px">USER MANAGEMENT • MULTI AREA</div><div class="small">User yang sama dapat diberi akses Area A, Area B, atau keduanya.</div>';box.appendChild(d)}
 document.addEventListener('DOMContentLoaded',()=>setTimeout(install,500));
 window.STT_OPEN_AREA_SELECTOR=openSelector;
