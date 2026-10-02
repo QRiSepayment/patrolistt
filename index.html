@@ -1933,7 +1933,7 @@ const STT_FINDING_CENTRAL_URL = GAS_API_ENDPOINTS[0];
 const GOOGLE_DRIVE_FOLDER_ID = "1G28FlBrRC81QRAUQpQB1L1HUssxiYL8N";
 
 
-// ===== STT V30 RESPONSE + MULTI-AREA HARDENING =====
+// ===== STT V35 PERSISTENCE + NATIVE POINT DROPDOWN HARDENING =====
 async function sttReadJson(response, context='CENTRAL'){
   const text=await response.text();
   const raw=String(text||'').trim();
@@ -3445,7 +3445,7 @@ function setupSuperCleanup() {
 
     targetAreaSelect?.addEventListener('change', e => { currentTargetArea = e.target.value; });
 
-    // V34: native Android dropdown. ALL points remain visible; selected points are not disabled.
+    // V35: native Android dropdown. ALL points remain visible; selected points are not disabled.
     const pointSelect=document.getElementById('addAreaCameraBtn');
     pointSelect?.addEventListener('change', async e=>{
       const value=String(e.target.value||'');
@@ -4058,8 +4058,26 @@ function setupSuperCleanup() {
     }
     async function refreshNativePointSelect_(){
       const sel=document.getElementById('addAreaCameraBtn'); if(!sel)return;
-      const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
-      if(!active||active==='ALL'){
+      // V35: NEVER leave the native point dropdown empty after refresh/reopen.
+      // Recover the last active area from durable local state; if it is missing,
+      // use the first allowed area (or AREA_A as the safe default).
+      let active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+      const validArea=x=>/^AREA_[A-Z0-9]+$/.test(String(x||'').toUpperCase());
+      if(!validArea(active)||active==='ALL'){
+        const candidates=[];
+        try{ candidates.push(String(localStorage.getItem('STT_LAST_ACTIVE_AREA_V1')||'')); }catch(_){}
+        try{ candidates.push(String(localStorage.getItem('STT_USER_AREA_V1')||'')); }catch(_){}
+        try{
+          const raw=String(localStorage.getItem('STT_ALLOWED_AREAS_V1')||'');
+          raw.split(',').forEach(x=>candidates.push(x));
+        }catch(_){}
+        active=(candidates.map(x=>String(x||'').trim().toUpperCase()).find(validArea)||'AREA_A');
+        try{
+          localStorage.setItem('STT_ACTIVE_AREA_V1',active);
+          localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',active);
+        }catch(_){}
+      }
+      if(!validArea(active)){
         sel.innerHTML='<option value="">📍 PILIH AREA PATROLI</option>';
         return;
       }
@@ -4201,7 +4219,23 @@ function setupSuperCleanup() {
         if(typeof window.STT_REFRESH_POINT_SELECT==='function') window.STT_REFRESH_POINT_SELECT();
       }catch(e){console.warn('[AREA DATA RELOAD]',e);renderAreas();}
     }
-    window.STT_RELOAD_ACTIVE_AREA=reloadPatrolDataForActiveArea;
+    // V35 final durability guard: preserve active area before refresh/close.
+  function sttPersistActiveAreaBeforeExit_(){
+    try{
+      let a=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||localStorage.getItem('STT_LAST_ACTIVE_AREA_V1')||'').toUpperCase();
+      if(!/^AREA_[A-Z0-9]+$/.test(a)) a='AREA_A';
+      localStorage.setItem('STT_ACTIVE_AREA_V1',a);
+      localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',a);
+      const raw=JSON.stringify(patrolData||{});
+      localStorage.setItem('patrol_meta_v1_'+a,raw);
+      localStorage.setItem('patrol_meta_ts_v1_'+a,String(Date.now()));
+      if(db&&typeof idbPut==='function') idbPut(STORE_META,'patrol_meta_v1_'+a,{payload:patrolData||{},updatedAt:Date.now()});
+    }catch(e){ console.warn('[V35 EXIT SAVE]',e); }
+  }
+  window.addEventListener('pagehide',sttPersistActiveAreaBeforeExit_);
+  window.addEventListener('beforeunload',sttPersistActiveAreaBeforeExit_);
+
+  window.STT_RELOAD_ACTIVE_AREA=reloadPatrolDataForActiveArea;
     window.addEventListener('stt-area-changed',reloadPatrolDataForActiveArea);
     setTimeout(()=>{try{if(String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase())reloadPatrolDataForActiveArea();}catch(_){ }},250);
 
