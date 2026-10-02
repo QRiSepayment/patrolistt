@@ -2878,23 +2878,25 @@ function setupSuperCleanup() {
   function persistMeta(){
     try{
       const payload = JSON.stringify(patrolData);
-      // Keep localStorage only for small metadata. Photos are already handled
-      // separately; if quota is exhausted, do not crash the application.
       const active=(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').trim().toUpperCase();
-      if(/^AREA_[A-Z0-9]+$/.test(active)) {
-        localStorage.setItem('patrol_meta_v1_'+active, payload);
-        if(db && typeof idbPut==='function') idbPut(STORE_META,'patrol_meta_v1_'+active,{payload:patrolData,updatedAt:Date.now()});
+      if(!/^AREA_[A-Z0-9]+$/.test(active)) return false;
+      const now=Date.now();
+      // CRITICAL: remember the active patrol area independently from login/session.
+      localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',active);
+      localStorage.setItem('patrol_meta_v1_'+active,payload);
+      localStorage.setItem('patrol_meta_ts_v1_'+active,String(now));
+      // IndexedDB is the durable source for patrol metadata when browser storage is stressed.
+      if(db && typeof idbPut==='function'){
+        idbPut(STORE_META,'patrol_meta_v1_'+active,{payload:patrolData,updatedAt:now});
       }
       return true;
     }catch(err){
       console.warn('[Patrolistt] localStorage quota/error:', err);
-      // Best-effort IndexedDB fallback. Never throw from persistMeta().
       try{
-        if(db && typeof idbPut === 'function'){
-          idbPut(STORE_META, 'patrol_meta_fallback', {
-            payload: patrolData,
-            updatedAt: Date.now()
-          });
+        const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||localStorage.getItem('STT_LAST_ACTIVE_AREA_V1')||'').toUpperCase();
+        if(/^AREA_[A-Z0-9]+$/.test(active) && db && typeof idbPut==='function'){
+          idbPut(STORE_META,'patrol_meta_v1_'+active,{payload:patrolData,updatedAt:Date.now()});
+          try{localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',active)}catch(_){}
         }
       }catch(_){}
       return false;
@@ -3443,12 +3445,17 @@ function setupSuperCleanup() {
 
     targetAreaSelect?.addEventListener('change', e => { currentTargetArea = e.target.value; });
 
-    // V33: native Android dropdown. ALL points remain visible; selected points are not disabled.
+    // V34: native Android dropdown. ALL points remain visible; selected points are not disabled.
     const pointSelect=document.getElementById('addAreaCameraBtn');
     pointSelect?.addEventListener('change', async e=>{
       const value=String(e.target.value||'');
       if(!value){ return; }
-      try{ await addNewArea(value); }catch(err){ console.warn('[POINT SELECT]',err); }
+      try{
+        // Keep the selected working area durable even if the browser is refreshed/closed.
+        try{ localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase()); }catch(_){}
+        await addNewArea(value);
+        try{ persistMeta(); }catch(_){}
+      }catch(err){ console.warn('[POINT SELECT]',err); }
       e.target.value='';
       if(typeof window.STT_REFRESH_POINT_SELECT==='function') window.STT_REFRESH_POINT_SELECT();
     });
@@ -4157,20 +4164,42 @@ function setupSuperCleanup() {
     async function reloadPatrolDataForActiveArea(){
       try{
         currentTargetArea=null;
-        const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+        let active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+        // Restore the last working area BEFORE rendering the patrol UI.
         if(!/^AREA_[A-Z0-9]+$/.test(active)){
-          patrolData={}; renderAreas(); updateAreaSelector(); update23AreaCounter(); return;
+          const candidates=[localStorage.getItem('STT_LAST_ACTIVE_AREA_V1'),localStorage.getItem('STT_USER_AREA_V1')];
+          active=(candidates.map(x=>String(x||'').toUpperCase()).find(x=>/^AREA_[A-Z0-9]+$/.test(x))||'');
+          if(active) try{localStorage.setItem('STT_ACTIVE_AREA_V1',active)}catch(_){}
         }
+        if(!/^AREA_[A-Z0-9]+$/.test(active)){
+          patrolData={}; renderAreas(); updateAreaSelector(); update23AreaCounter();
+          if(typeof window.STT_REFRESH_POINT_SELECT==='function') window.STT_REFRESH_POINT_SELECT();
+          return;
+        }
+        try{localStorage.setItem('STT_LAST_ACTIVE_AREA_V1',active)}catch(_){}
         if(active==='AREA_A'||active==='AREA_B') migrateLegacyMixedAreaData_(active);
+        let localData=null, idbData=null, localTs=Number(localStorage.getItem('patrol_meta_ts_v1_'+active)||0)||0, idbTs=0;
         const raw=localStorage.getItem('patrol_meta_v1_'+active);
-        if(raw){try{patrolData=JSON.parse(raw)||{};}catch(_){patrolData={};}}
-        else{
-          patrolData={};
-          try{const saved=await idbGet(STORE_META,'patrol_meta_v1_'+active);if(saved&&saved.payload&&typeof saved.payload==='object')patrolData=saved.payload;}catch(_){}
+        if(raw){
+          try{
+            const parsed=JSON.parse(raw);
+            localData=(parsed&&parsed.payload&&typeof parsed.payload==='object')?parsed.payload:parsed;
+          }catch(_){}
         }
+        try{
+          const saved=await idbGet(STORE_META,'patrol_meta_v1_'+active);
+          if(saved&&saved.payload&&typeof saved.payload==='object'){idbData=saved.payload;idbTs=Number(saved.updatedAt||0)||0;}
+        }catch(_){}
+        // Prefer the newest durable copy. This prevents a stale localStorage copy from
+        // overwriting a newer patrol after a force-close/refresh.
+        if(idbData && idbTs>localTs) patrolData=idbData;
+        else if(localData && typeof localData==='object'&&!Array.isArray(localData)) patrolData=localData;
+        else if(idbData) patrolData=idbData;
+        else patrolData={};
         if(!patrolData||typeof patrolData!=='object'||Array.isArray(patrolData))patrolData={};
         renderAreas(); updateAreaSelector(); update23AreaCounter();
-      }catch(e){console.warn('[AREA DATA RELOAD]',e);patrolData={};renderAreas();}
+        if(typeof window.STT_REFRESH_POINT_SELECT==='function') window.STT_REFRESH_POINT_SELECT();
+      }catch(e){console.warn('[AREA DATA RELOAD]',e);renderAreas();}
     }
     window.STT_RELOAD_ACTIVE_AREA=reloadPatrolDataForActiveArea;
     window.addEventListener('stt-area-changed',reloadPatrolDataForActiveArea);
@@ -5354,7 +5383,8 @@ renderAreas();
         catch(e){}
         const prevActive=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
         const allowedAfter=Array.isArray(j.area_ids)?j.area_ids.map(String).map(x=>x.toUpperCase()):[];
-        const keepActive=prevActive&&prevActive!=='ALL'&&allowedAfter.includes(prevActive)?prevActive:'';
+        const remembered=String(localStorage.getItem('STT_LAST_ACTIVE_AREA_V1')||localStorage.getItem('STT_USER_AREA_V1')||'').toUpperCase();
+        const keepActive=prevActive&&prevActive!=='ALL'&&allowedAfter.includes(prevActive)?prevActive:(remembered&&allowedAfter.includes(remembered)?remembered:'');
         if(keepActive){try{localStorage.setItem('STT_ACTIVE_AREA_V1',keepActive);}catch(e){}}
         apply('allowed');
         setTimeout(()=>{try{
@@ -5389,8 +5419,12 @@ renderAreas();
         try{localStorage.setItem('STT_ALLOWED_AREAS_V1',Array.isArray(j.area_ids)?j.area_ids.join(','):String(j.area_ids||j.area_id||''));}catch(e){}
         if(j.is_admin){setAdminBypass(true);try{localStorage.setItem('STT_ADMIN_SESSION_V1',token)}catch(e){}}
         else setAdminBypass(false);
-        const active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
+        let active=String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'').toUpperCase();
         const allowed=Array.isArray(j.area_ids)?j.area_ids.map(String):[];
+        if(!active||active==='ALL'){
+          const remembered=String(localStorage.getItem('STT_LAST_ACTIVE_AREA_V1')||localStorage.getItem('STT_USER_AREA_V1')||'').toUpperCase();
+          if(remembered&&allowed.includes(remembered)){ active=remembered; try{localStorage.setItem('STT_ACTIVE_AREA_V1',active)}catch(_){} }
+        }
         if(active && active!=='ALL' && !allowed.includes(active)){try{localStorage.removeItem('STT_ACTIVE_AREA_V1')}catch(e){}}
         apply('allowed');
         if(!String(localStorage.getItem('STT_ACTIVE_AREA_V1')||'') && typeof window.STT_OPEN_AREA_SELECTOR==='function'){
@@ -5902,7 +5936,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<!-- ==================== STT MULTI AREA ACCESS V33 NATIVE DROPDOWN ALL-POINTS ==================== -->
+<!-- ==================== STT MULTI AREA ACCESS V34 NATIVE DROPDOWN ALL-POINTS ==================== -->
 <style id="STT_MULTI_AREA_ACCESS_CSS_V15">
 #sttAreaGateV15{position:fixed;inset:0;z-index:2147483646;background:rgba(3,12,30,.97);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 #sttAreaGateV15 .stt-area-card{width:min(520px,100%);background:#fff;border-radius:24px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.45);font-family:inherit;text-align:center}
@@ -5983,7 +6017,7 @@ async function openSelector(info){
 }
 function gate(){if(document.getElementById('sttAreaGateV15'))return;const a=allowed();const isAdmin=ua()==='ALL';if(!isAdmin&&!a.length)return;openSelector({is_admin:isAdmin,area_id:a[0]||'ALL',area_ids:isAdmin?AREAS:a,user_token:get(K.T)})}
 function badge(){try{const t=document.querySelector('.app-brand-title');if(!t||!aa())return;let b=document.getElementById('sttAreaBadgeV15');if(!b){b=document.createElement('span');b.id='sttAreaBadgeV15';t.appendChild(b)}b.textContent=aa()==='ALL'?'ALL AREA':aa().replace('_',' ')}catch(e){}}
-const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V33){window.__STT_MULTI_AREA_FETCH_V33=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
+const of=window.fetch;if(typeof of==='function'&&!window.__STT_MULTI_AREA_FETCH_V34){window.__STT_MULTI_AREA_FETCH_V33=1;window.fetch=function(url,opt){try{const u=String(url||''),o=Object.assign({},opt||{});if(/script\.google\.com\/macros\/s\//i.test(u)){let p;if(o.body instanceof URLSearchParams)p=new URLSearchParams(o.body);else if(typeof o.body==='string')p=new URLSearchParams(o.body);if(p){const act=String(p.get('action')||'').toUpperCase(),tok=get(K.T),ar=aa();if(act!=='USER_LOGIN'&&tok&&!p.has('user_token'))p.set('user_token',tok);if(ar&&ar!=='ALL'&&!p.has('area_id'))p.set('area_id',ar);o.body=p}}return of.call(this,url,o).then(async r=>{try{const j=await r.clone().json();if(j&&j.user_token)set(K.T,j.user_token);if(j&&j.status==='allowed'){if(j.area_ids)saveAllowed(j.area_ids);else if(j.area_id==='ALL')saveAllowed(AREAS);else if(j.area_id)saveAllowed([j.area_id]);if(bool(j.is_admin))set(K.U,'ALL');}}catch(e){}return r})}catch(e){return of.call(this,url,opt)}}}
 function clear(){del(K.T);del(K.U);del(K.A);del(K.P);del('STT_ADMIN_BYPASS_V1');del('STT_ADMIN_SESSION_V1');del('STT_USER_CREDS_V1')}
 function wrap(){try{if(window.STT_USER_ACCESS&&!window.STT_USER_ACCESS.__MA){const old=window.STT_USER_ACCESS.logout;window.STT_USER_ACCESS.logout=function(){clear();if(typeof old==='function')old()};window.STT_USER_ACCESS.__MA=1}}catch(e){}}
 function install(){wrap();const c=(()=>{try{return JSON.parse(localStorage.getItem('STT_USER_CREDS_V1')||'null')}catch(e){return null}})();if(c&&c.u&&allowed().length&&aa())badge();adminCrud()}
