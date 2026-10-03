@@ -2396,6 +2396,39 @@ const memoryManager = new MemoryManager();
   window.addEventListener('offline',updateOnlineStatus);
   setInterval(()=>{ updateOnlineStatus(); syncPendingPdfs(); },SYNC_RETRY_INTERVAL);
 
+// ==================== SAFE ORPHAN BLOB CLEANUP (anti kehilangan foto) ====================
+// BUG TERBUKTI: cleanup lama berjalan SAAT STARTUP (patrolData masih {}) dan hanya melihat area aktif,
+// padahal blob foto disimpan global untuk semua area -> semua foto "yatim" ikut terhapus.
+// Perbaikan: (1) kumpulkan referensi dari SEMUA area (localStorage + IndexedDB + memori),
+// (2) JANGAN pernah hapus blob yang umurnya < 30 hari, (3) kunci non-foto-patroli tidak disentuh.
+async function sttCollectUsedBlobKeys_(){
+    const used=new Set();
+    const grab=(txt)=>{try{String(txt||'').replace(/"(?:ref|masterRef)"\s*:\s*"([^"]+)"/g,(m,k)=>{used.add(k);return m;});}catch(_){}};
+    try{grab(JSON.stringify(patrolData||{}));}catch(_){}
+    try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.indexOf('patrol_meta')===0)grab(localStorage.getItem(k));}}catch(_){}
+    try{
+        if(db){
+            const keys=await new Promise(res=>{const r=db.transaction([STORE_META],'readonly').objectStore(STORE_META).getAllKeys();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>res([]);});
+            for(const k of keys){if(String(k).indexOf('patrol_meta')===0){const v=await idbGet(STORE_META,k);try{grab(JSON.stringify(v));}catch(_){}}}
+        }
+    }catch(_){}
+    try{if(typeof officerPhotoRef==='string'&&officerPhotoRef)used.add(officerPhotoRef);}catch(_){}
+    return used;
+}
+async function sttSafeOrphanCleanup_(){
+    if(!db)return 0;
+    const used=await sttCollectUsedBlobKeys_();
+    const allKeys=await new Promise(res=>{const r=db.transaction([STORE_BLOBS],'readonly').objectStore(STORE_BLOBS).getAllKeys();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>res([]);});
+    const MIN_AGE=30*24*3600*1000,now=Date.now();let deleted=0;
+    for(const key of allKeys){
+        if(used.has(key))continue;
+        const m=String(key).match(/^[bm]_(\d{12,14})_/);
+        if(!m)continue;                         // bukan blob foto patroli -> jangan sentuh
+        if(now-Number(m[1])<MIN_AGE)continue;   // terlalu baru -> jangan hapus
+        await idbDelete(STORE_BLOBS,key);deleted++;
+    }
+    return deleted;
+}
 // ==================== AUTO STORAGE CLEANUP SYSTEM ====================
 async function autoStorageCleanup() {
     console.log('🔄 Auto storage cleanup running...');
@@ -2408,39 +2441,7 @@ async function autoStorageCleanup() {
 
         // 1. CLEANUP INDEXEDDB BLOBS YANG TIDAK TERPAKAI (aman: cuma hapus blob yatim,
         //    yaitu blob yang sudah tidak direferensikan oleh foto manapun)
-        if (db) {
-            const usedBlobKeys = new Set();
-            
-            // Kumpulkan semua blob keys yang masih dipakai
-            Object.keys(patrolData).forEach(areaKey => {
-                const area = patrolData[areaKey];
-                area.photos.forEach(photo => {
-                    if (photo && photo.ref) usedBlobKeys.add(photo.ref);
-                    if (photo && photo.masterRef) usedBlobKeys.add(photo.masterRef);
-                });
-            });
-            
-            // Hapus blob yang tidak terpakai
-            const tx = db.transaction([STORE_BLOBS], 'readonly');
-            const store = tx.objectStore(STORE_BLOBS);
-            const allKeys = await new Promise(resolve => {
-                const request = store.getAllKeys();
-                request.onsuccess = () => resolve(request.result);
-            });
-            
-            let deletedBlobs = 0;
-            for (const key of allKeys) {
-                if (!usedBlobKeys.has(key)) {
-                    await idbDelete(STORE_BLOBS, key);
-                    deletedBlobs++;
-                    console.log(`🗑️ Deleted unused blob: ${key}`);
-                }
-            }
-            
-            if (deletedBlobs > 0) {
-                console.log(`✅ Auto cleanup: Deleted ${deletedBlobs} unused blobs`);
-            }
-        }
+        try{ const _d=await sttSafeOrphanCleanup_(); if(_d>0)console.log('Auto cleanup: '+_d+' blob yatim (>30 hari) dibersihkan'); }catch(_){ }
         
         // 3. CLEAR BROWSER CACHE UNTUK FOTO KITA
         if ('caches' in window) {
@@ -2485,24 +2486,7 @@ async function manualDeepCleanup() {
     try {
         let deletedBlobs = 0;
         // 1. Hapus blob foto yatim (blob yang sudah tidak direferensikan patrolData manapun)
-        if (db) {
-            const usedBlobKeys = new Set();
-            Object.keys(patrolData).forEach(areaKey => {
-                (patrolData[areaKey].photos || []).forEach(photo => {
-                    if (photo && photo.ref) usedBlobKeys.add(photo.ref);
-                    if (photo && photo.masterRef) usedBlobKeys.add(photo.masterRef);
-                });
-            });
-            const tx = db.transaction([STORE_BLOBS], 'readonly');
-            const store = tx.objectStore(STORE_BLOBS);
-            const allKeys = await new Promise(resolve => {
-                const request = store.getAllKeys();
-                request.onsuccess = () => resolve(request.result);
-            });
-            for (const key of allKeys) {
-                if (!usedBlobKeys.has(key)) { await idbDelete(STORE_BLOBS, key); deletedBlobs++; }
-            }
-        }
+        try{ deletedBlobs = await sttSafeOrphanCleanup_(); }catch(_){ deletedBlobs=0; }
 
         // 2. Clear cache HTTP (blob foto TIDAK disentuh)
         if ('caches' in window) {
@@ -5584,7 +5568,7 @@ renderAreas();
       const r=await fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({action:'VALIDATE_SESSION',user_token:token}).toString(),cache:'no-store'});
       const j=await sttReadJson(r);
       if(j&&j.ok!==false&&j.validated){
-        try{await refreshDynamicAreas_(token,true);}catch(_){ }
+        try{await refreshDynamicAreas_(token,true);sttRelabelAreas_();}catch(_){ }
         if(j.user_token)try{localStorage.setItem('STT_USER_TOKEN_V1',String(j.user_token))}catch(e){}
         try{localStorage.setItem('STT_ALLOWED_AREAS_V1',Array.isArray(j.area_ids)?j.area_ids.join(','):String(j.area_ids||j.area_id||''));}catch(e){}
         if(j.is_admin){setAdminBypass(true);try{localStorage.setItem('STT_ADMIN_SESSION_V1',token)}catch(e){}}
@@ -5688,6 +5672,7 @@ renderAreas();
     try{localStorage.setItem('STT_AREA_NAMES_V1',JSON.stringify(names));}catch(_){}
     AREAS.splice(0,AREAS.length,...(arr.map(x=>String(x.area_id).toUpperCase()).filter(Boolean)));
     saveAllowed(AREAS);
+    sttRelabelAreas_();
     const checks=document.getElementById('ugNewAreaChecks');
     if(checks)checks.innerHTML=arr.map(a=>`<label class="small" style="display:inline-flex;gap:6px;margin:4px 12px 0 0"><input type="checkbox" data-area-id="${String(a.area_id)}" checked> ${String(a.area_name||a.area_id)}</label>`).join('');
     const E=v=>String(v??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -5701,6 +5686,14 @@ renderAreas();
     list.querySelectorAll('[data-del-area]').forEach(b=>b.onclick=()=>{if(!confirm('Hapus area dari daftar? Data, foto, dan riwayat lama TIDAK dihapus (tetap tersimpan di server).'))return;act(()=>sttAreaPost_({action:'DELETE_AREA',area_id:b.dataset.delArea}));});
   }catch(e){list.textContent='❌ '+(e.message||e);}
 }
+function sttRelabelAreas_(){
+  try{
+    document.querySelectorAll('option[value^="AREA_"]').forEach(o=>{const l=window.areaLabel_?window.areaLabel_(o.value):'';if(l&&o.textContent.indexOf('📍')!==0)o.textContent=l;});
+    document.querySelectorAll('.stt-area-btn[data-a]').forEach(b=>{const a=b.dataset.a;if(a&&a!=='ALL'&&window.areaLabel_)b.textContent='📍 '+window.areaLabel_(a);});
+    if(typeof window.STT_REFRESH_POINT_SELECT==='function')window.STT_REFRESH_POINT_SELECT();
+  }catch(_){}
+}
+window.sttRelabelAreas_=sttRelabelAreas_;
 function sttAreaPost_(params){
   return fetch(CENTRAL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
     body:new URLSearchParams(Object.assign({user_token:localStorage.getItem('STT_USER_TOKEN_V1')||'',admin_session:adminSessionToken},params)).toString()}).then(sttReadJson).then(j=>{if(!j||j.ok===false)throw new Error(j?.message||j?.error||'Gagal.');return j;});
