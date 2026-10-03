@@ -4222,6 +4222,52 @@ function setupSuperCleanup() {
       }catch(e){ console.warn('[POINT SELECT CUSTOM LOAD]',e); }
     }
     window.STT_REFRESH_POINT_SELECT=refreshNativePointSelect_;
+    /* ===== Picker titik patroli: centang MERAH di dalam lingkaran (modul terisolasi) =====
+       Dropdown native tidak bisa di-style, jadi diganti daftar kustom. Select asli TETAP dipakai
+       sebagai sumber data & penerima change (handler lama tidak berubah). Gagal -> fallback native. */
+    (function sttPointPicker_(){
+      const MARK=' ✓ SUDAH DIPILIH';
+      function open(sel){
+        const rows=Array.from(sel.options).filter(o=>o.value!=='');
+        if(!rows.length)return false;
+        if(document.getElementById('sttPointPicker'))return true;
+        const wrap=document.createElement('div');wrap.id='sttPointPicker';
+        wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:14px';
+        const box=document.createElement('div');
+        box.style.cssText='background:#fff;border-radius:22px;width:100%;max-width:520px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.35)';
+        const head=document.createElement('div');
+        head.style.cssText='padding:16px 18px;font-weight:900;color:#0b3d91;font-size:17px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center';
+        head.innerHTML='<span>📍 PILIH AREA PATROLI</span>';
+        const x=document.createElement('button');x.type='button';x.textContent='✕';x.style.cssText='border:0;background:#f1f5f9;border-radius:10px;padding:6px 12px;font-size:16px;font-weight:900';
+        head.appendChild(x);box.appendChild(head);
+        const list=document.createElement('div');list.style.cssText='overflow:auto;-webkit-overflow-scrolling:touch';
+        rows.forEach(o=>{
+          const raw=String(o.textContent||''),done=raw.indexOf(MARK)>=0,name=raw.replace(MARK,'');
+          const r=document.createElement('button');r.type='button';
+          r.style.cssText='display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;text-align:left;padding:14px 18px;border:0;border-bottom:1px solid #eef2f7;background:#fff;font-size:16px;font-weight:700;color:#0f172a';
+          const t=document.createElement('span');t.textContent=name;t.style.cssText='flex:1;min-width:0;word-break:break-word';
+          const c=document.createElement('span');
+          c.style.cssText='flex:0 0 28px;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:900;box-sizing:border-box;'+(done?'background:#dc2626;border:2px solid #dc2626;color:#fff':'border:2px solid #94a3b8;color:transparent');
+          c.textContent='✓';
+          r.appendChild(t);r.appendChild(c);
+          r.onclick=()=>{close();sel.value=o.value;sel.dispatchEvent(new Event('change',{bubbles:true}));};
+          list.appendChild(r);
+        });
+        box.appendChild(list);wrap.appendChild(box);
+        function close(){try{wrap.remove();}catch(_){}}
+        x.onclick=close;wrap.addEventListener('click',e=>{if(e.target===wrap)close();});
+        document.body.appendChild(wrap);return true;
+      }
+      function attach(){
+        const sel=document.getElementById('addAreaCameraBtn');
+        if(!sel||sel.__sttPicker||sel.tagName!=='SELECT')return;
+        sel.__sttPicker=true;
+        const h=e=>{try{if(open(sel)){e.preventDefault();e.stopPropagation();sel.blur();}}catch(_){}};
+        sel.addEventListener('mousedown',h);
+        sel.addEventListener('click',h);
+      }
+      setTimeout(attach,0);
+    })();
     window.STT_REFRESH_WORK_AREA_SELECT=refreshWorkAreaSelect_;
     // V38: always rebuild the FIRST dropdown (AREA A/B) and then the POINT dropdown.
     // A refresh/force-close must never make the area selector disappear.
